@@ -1,0 +1,27 @@
+# Wine profile: ~/.config/lootrs/profiles/default.toml
+# `name` must match the file name. Paths may start with `~`.
+# Saving a profile from the TUI rewrites this file, which drops comments.
+
+name = "default"
+runner = "wine"                                 # wine | umu | native
+prefix = "~/.local/share/lootrs/prefixes/default"
+# runner_args = []                              # between the runner binary and the exe
+# wrappers = ["mangohud", "gamemoderun"]        # prepended to the whole command
+# debug = false                                 # verbose wine/DXVK logging in run logs
+
+# DXVK / VKD3D-Proton you installed yourself; lootrs never downloads them.
+# dxvk = "~/.local/share/dxvk/dxvk-2.6"         # contains x64/ (and x32/)
+# vkd3d = "~/.local/share/vkd3d/vkd3d-proton-2.14"  # contains x64/ (and x86/)
+
+# [env]
+# WINE_FULLSCREEN_FSR = "1"
+
+# [dll_overrides]                               # merged into WINEDLLOVERRIDES
+# winhttp = "n,b"
+
+[wine]
+# path = "/opt/wine-staging/bin/wine"           # default: `wine` from PATH
+
+# [anticheat]                                   # needs the runtimes set in config.toml;
+# battleye = false                              # only Proton-based wine builds honor them
+# eac = false

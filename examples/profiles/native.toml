@@ -1,0 +1,7 @@
+# Native Linux executables, run as is: ~/.config/lootrs/profiles/native.toml
+
+name = "native"
+runner = "native"
+# wrappers = ["gamemoderun"]
+# [env]
+# SDL_VIDEODRIVER = "wayland"

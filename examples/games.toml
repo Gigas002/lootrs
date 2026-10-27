@@ -1,0 +1,21 @@
+# lootrs games list: ~/.config/lootrs/games.toml
+# One [[game]] table per game. Paths may start with `~`.
+
+[[game]]
+name = "wow"                                    # unique id: `lootrs run wow`
+exe = "~/Games/wow/_retail_/Wow.exe"
+profile = "default"                             # file name in profiles/, without .toml
+args = ["-launch"]                              # optional
+# cwd = "~/Games/wow/_retail_"                  # optional; default: the exe's directory
+# env = { DXVK_HUD = "fps" }                    # optional; merged over the profile's env
+
+[[game]]
+name = "witcher3"
+exe = "~/Games/witcher3/bin/x64/witcher3.exe"
+profile = "proton"
+game_id = "umu-292030"                          # umu only: GAMEID for protonfixes
+
+[[game]]
+name = "openmw"
+exe = "/usr/bin/openmw"
+profile = "native"

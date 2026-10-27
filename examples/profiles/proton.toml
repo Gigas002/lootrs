@@ -1,0 +1,17 @@
+# Proton via umu-launcher: ~/.config/lootrs/profiles/proton.toml
+
+name = "proton"
+runner = "umu"
+prefix = "~/.local/share/lootrs/prefixes/proton"
+# wrappers = ["mangohud"]
+
+[umu]
+# Required: an installed Proton build. lootrs never lets umu download one.
+proton = "~/.local/share/Steam/compatibilitytools.d/GE-Proton10-20"
+# umu_run = "/usr/bin/umu-run"                  # default: `umu-run` from PATH
+# game_id = "umu-default"                       # default GAMEID; games can override
+# store = ""                                    # STORE for protonfixes
+
+# [anticheat]
+# battleye = false
+# eac = false
