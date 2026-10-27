@@ -23,6 +23,7 @@ fn main() -> ExitCode {
 
     match app::run(&settings) {
         Ok(code) => ExitCode::from(code),
+        Err(err) if err.is_broken_pipe() => ExitCode::SUCCESS,
         Err(err) => {
             tracing::error!("{err}");
             // The stderr log layer is off while the TUI owns the terminal.

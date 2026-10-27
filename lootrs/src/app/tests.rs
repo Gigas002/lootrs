@@ -13,17 +13,6 @@ fn settings(action: Action) -> Settings {
 }
 
 #[test]
-fn json_status_is_not_implemented_yet() {
-    let err = run(&settings(Action::Status { json: true })).unwrap_err();
-
-    assert_eq!(err.exit_code(), 1);
-    assert_eq!(
-        err.to_string(),
-        "`--json` is not implemented yet (planned for M7)"
-    );
-}
-
-#[test]
 fn busy_prefix_exit_code() {
     let busy = AppError::Prefix(PrefixError::Busy {
         prefix: "/p".into(),
@@ -48,16 +37,6 @@ fn logs_without_runs() {
 
     assert_eq!(err.exit_code(), 1);
     assert_eq!(err.to_string(), "no run logs for `wow` yet");
-}
-
-#[test]
-fn json_output_is_not_implemented_yet() {
-    let err = run(&settings(Action::List { json: true })).unwrap_err();
-
-    assert_eq!(
-        err.to_string(),
-        "`--json` is not implemented yet (planned for M7)"
-    );
 }
 
 #[cfg(not(feature = "tui"))]
@@ -85,4 +64,14 @@ fn validation_context_from_settings() {
     assert_eq!(ctx.home, Path::new("/nonexistent-home"));
     assert!(!ctx.battleye_runtime);
     assert!(ctx.eac_runtime);
+}
+
+#[test]
+fn broken_pipe_is_recognized() {
+    let pipe = AppError::Output(io::Error::from(io::ErrorKind::BrokenPipe));
+    let other = AppError::Output(io::Error::from(io::ErrorKind::PermissionDenied));
+
+    assert!(pipe.is_broken_pipe());
+    assert!(!other.is_broken_pipe());
+    assert!(!AppError::Cancelled.is_broken_pipe());
 }

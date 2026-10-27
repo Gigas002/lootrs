@@ -1,12 +1,14 @@
 //! Command handlers. Each writes its output to `out` so tests can capture it.
 
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     io::{self, BufRead, Write},
+    path::Path,
 };
 
 use liblootrs::{
-    model::{Issue, Severity, Subject, ValidationContext},
+    launch::{self, LaunchContext},
+    model::{Issue, Profile, Runner, Severity, Subject, ValidationContext},
     process::{self, Outcome, Owner, Process},
     runlog::{self, RunKind},
     store::{self, Catalog},
@@ -44,6 +46,116 @@ pub fn list(catalog: &Catalog, out: &mut impl Write) -> Result<(), AppError> {
     });
 
     write!(out, "{}", table(std::iter::once(header).chain(rows)))?;
+    Ok(())
+}
+
+/// One game in `lootrs list --json`. Every key is always present.
+#[derive(Debug, serde::Serialize)]
+struct GameJson<'a> {
+    name: &'a str,
+    profile: &'a str,
+    /// `null` when the profile doesn't exist.
+    runner: Option<Runner>,
+    exe: &'a Path,
+    args: &'a [String],
+    cwd: Option<&'a Path>,
+    game_id: Option<&'a str>,
+    env: &'a BTreeMap<String, String>,
+    running: bool,
+}
+
+/// `lootrs list --json`: games with their runner and running state.
+pub fn list_json(
+    catalog: &Catalog,
+    processes: &[Process],
+    out: &mut impl Write,
+) -> Result<(), AppError> {
+    let running = process::running(processes);
+    let games: Vec<GameJson> = catalog
+        .games
+        .iter()
+        .map(|game| GameJson {
+            name: &game.name,
+            profile: &game.profile,
+            runner: catalog.profile(&game.profile).map(|profile| profile.runner),
+            exe: &game.exe,
+            args: &game.args,
+            cwd: game.cwd.as_deref(),
+            game_id: game.game_id.as_deref(),
+            env: &game.env,
+            running: running.contains_key(&Owner::Game(game.name.clone())),
+        })
+        .collect();
+    write_json(out, &games)
+}
+
+/// One profile in `lootrs profiles --json`: the profile file's contents plus
+/// the games that use it.
+#[derive(Debug, serde::Serialize)]
+struct ProfileJson<'a> {
+    #[serde(flatten)]
+    profile: &'a Profile,
+    games: Vec<&'a str>,
+}
+
+/// `lootrs profiles --json`.
+pub fn profiles_json(catalog: &Catalog, out: &mut impl Write) -> Result<(), AppError> {
+    let profiles: Vec<ProfileJson> = catalog
+        .profiles
+        .iter()
+        .map(|profile| ProfileJson {
+            profile,
+            games: catalog
+                .games
+                .iter()
+                .filter(|game| game.profile == profile.name)
+                .map(|game| game.name.as_str())
+                .collect(),
+        })
+        .collect();
+    write_json(out, &profiles)
+}
+
+/// One game or session in `lootrs status --json`.
+#[derive(Debug, serde::Serialize)]
+struct RunningJson {
+    /// Game name, or `<kind>:<profile>:<stamp>` for sessions.
+    name: String,
+    kind: &'static str,
+    pids: Vec<u32>,
+    /// Distinct command names, wine infrastructure left out.
+    commands: Vec<String>,
+}
+
+/// `lootrs status --json`.
+pub fn status_json(processes: &[Process], out: &mut impl Write) -> Result<(), AppError> {
+    let running: Vec<RunningJson> = process::running(processes)
+        .into_iter()
+        .map(|(owner, group)| {
+            let mut commands: Vec<String> = Vec::new();
+            for process in group.iter().filter(|p| !p.is_wine_infrastructure()) {
+                if !commands.contains(&process.comm) {
+                    commands.push(process.comm.clone());
+                }
+            }
+            let (name, kind) = match owner {
+                Owner::Game(name) => (name, "game"),
+                Owner::Session(session) => (session, "session"),
+            };
+            RunningJson {
+                name,
+                kind,
+                pids: group.iter().map(|p| p.pid).collect(),
+                commands,
+            }
+        })
+        .collect();
+    write_json(out, &running)
+}
+
+fn write_json(out: &mut impl Write, value: &impl serde::Serialize) -> Result<(), AppError> {
+    serde_json::to_writer_pretty(&mut *out, value).map_err(io::Error::from)?;
+    writeln!(out)?;
     Ok(())
 }
 
@@ -203,9 +315,13 @@ pub fn logs(
 }
 
 /// `lootrs check`: prints every issue; fails if any is an error.
+///
+/// Profiles without validation errors are also preflighted (`launch_ctx`):
+/// runner, Proton build, wrappers and anti-cheat runtimes must exist.
 pub fn check(
     catalog: &Catalog,
     ctx: &ValidationContext,
+    launch_ctx: &LaunchContext,
     target: &CheckTarget,
     out: &mut impl Write,
 ) -> Result<(), AppError> {
@@ -242,6 +358,34 @@ pub fn check(
         }
         _ => issues,
     };
+
+    let profiles: Vec<&str> = match target {
+        CheckTarget::All => catalog.profiles.iter().map(|p| p.name.as_str()).collect(),
+        CheckTarget::Game(name) => catalog
+            .game(name)
+            .map(|g| g.profile.as_str())
+            .into_iter()
+            .collect(),
+        CheckTarget::Profile(name) => vec![name.as_str()],
+    };
+    let mut issues = issues;
+    for name in profiles {
+        let has_errors = issues.iter().any(|issue| {
+            issue.severity == Severity::Error && issue.subject == Subject::Profile(name.to_owned())
+        });
+        let Some(profile) = catalog.profile(name).filter(|_| !has_errors) else {
+            continue;
+        };
+        issues.extend(
+            launch::preflight(profile, launch_ctx)
+                .into_iter()
+                .map(|message| Issue {
+                    severity: Severity::Error,
+                    subject: Subject::Profile(name.to_owned()),
+                    message,
+                }),
+        );
+    }
 
     report(&issues, &checked, out)
 }

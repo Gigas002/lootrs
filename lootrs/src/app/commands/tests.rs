@@ -15,6 +15,33 @@ fn ctx() -> ValidationContext<'static> {
     }
 }
 
+/// Preflight context with fake `wine` and `umu-run` on the search path.
+fn launch_ctx() -> LaunchContext<'static> {
+    static BIN: std::sync::OnceLock<(tempfile::TempDir, Vec<std::path::PathBuf>)> =
+        std::sync::OnceLock::new();
+    let (_, search_path) = BIN.get_or_init(|| {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["wine", "umu-run"] {
+            let path = dir.path().join(name);
+            std::fs::write(&path, "#!/bin/sh\n").unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let search_path = vec![dir.path().to_path_buf()];
+        (dir, search_path)
+    });
+    LaunchContext {
+        home: Path::new("/home/u"),
+        search_path,
+        debug: false,
+        extra_args: &[],
+        artifacts_dir: Path::new("/nonexistent"),
+        battleye_runtime: None,
+        eac_runtime: None,
+        umu_runtime_update: false,
+    }
+}
+
 fn game(name: &str, profile: &str, exe: &Path) -> Game {
     Game {
         name: name.into(),
@@ -92,7 +119,8 @@ fn check_all_reports_errors() {
         .profiles
         .retain(|profile| profile.runner == Runner::Native);
 
-    let (out, result) = output(|out| check(&catalog, &ctx(), &CheckTarget::All, out));
+    let (out, result) =
+        output(|out| check(&catalog, &ctx(), &launch_ctx(), &CheckTarget::All, out));
 
     assert!(matches!(result, Err(AppError::CheckFailed(ref s)) if s == "1 error"));
     assert!(out.contains("error: game `orphan`: profile `missing` does not exist"));
@@ -105,6 +133,7 @@ fn check_single_game_ok() {
         check(
             &catalog(Path::new("/bin/true")),
             &ctx(),
+            &launch_ctx(),
             &CheckTarget::Game("openmw".into()),
             out,
         )
@@ -120,6 +149,7 @@ fn check_warnings_do_not_fail() {
         check(
             &catalog(Path::new("/nonexistent/game")),
             &ctx(),
+            &launch_ctx(),
             &CheckTarget::Game("openmw".into()),
             out,
         )
@@ -134,9 +164,24 @@ fn check_warnings_do_not_fail() {
 fn check_unknown_targets() {
     let catalog = catalog(Path::new("/bin/true"));
 
-    let (_, game) = output(|out| check(&catalog, &ctx(), &CheckTarget::Game("x".into()), out));
-    let (_, profile) =
-        output(|out| check(&catalog, &ctx(), &CheckTarget::Profile("x".into()), out));
+    let (_, game) = output(|out| {
+        check(
+            &catalog,
+            &ctx(),
+            &launch_ctx(),
+            &CheckTarget::Game("x".into()),
+            out,
+        )
+    });
+    let (_, profile) = output(|out| {
+        check(
+            &catalog,
+            &ctx(),
+            &launch_ctx(),
+            &CheckTarget::Profile("x".into()),
+            out,
+        )
+    });
 
     assert!(matches!(game, Err(AppError::UnknownGame(_))));
     assert!(matches!(profile, Err(AppError::UnknownProfile(_))));
@@ -162,6 +207,7 @@ fn check_profile_ignores_unrelated_broken_files() {
         check(
             &Catalog::load(dir.path()),
             &ctx(),
+            &launch_ctx(),
             &CheckTarget::Profile("native".into()),
             out,
         )
@@ -186,6 +232,7 @@ fn check_game_explains_broken_profile_file() {
         check(
             &Catalog::load(dir.path()),
             &ctx(),
+            &launch_ctx(),
             &CheckTarget::Game("g".into()),
             out,
         )
@@ -306,4 +353,92 @@ fn killall_nothing() {
     result.unwrap();
     assert!(!killed);
     assert_eq!(out, "nothing to kill\n");
+}
+
+fn json(f: impl FnOnce(&mut Vec<u8>) -> Result<(), AppError>) -> serde_json::Value {
+    let (out, result) = output(f);
+    result.unwrap();
+    serde_json::from_str(&out).unwrap()
+}
+
+#[test]
+fn list_json_has_runner_and_running_state() {
+    let catalog = catalog(Path::new("/bin/true"));
+    let processes = [proc(1, "openmw", Some("openmw"))];
+
+    let value = json(|out| list_json(&catalog, &processes, out));
+
+    assert_eq!(
+        value,
+        serde_json::json!([
+            {
+                "name": "openmw", "profile": "native", "runner": "native",
+                "exe": "/bin/true", "args": [], "cwd": null, "game_id": null,
+                "env": {}, "running": true
+            },
+            {
+                "name": "orphan", "profile": "missing", "runner": null,
+                "exe": "/bin/true", "args": [], "cwd": null, "game_id": null,
+                "env": {}, "running": false
+            }
+        ])
+    );
+    assert_eq!(
+        json(|out| list_json(&Catalog::default(), &[], out)),
+        serde_json::json!([])
+    );
+}
+
+#[test]
+fn profiles_json_is_the_profile_plus_games() {
+    let value = json(|out| profiles_json(&catalog(Path::new("/bin/true")), out));
+
+    assert_eq!(
+        value,
+        serde_json::json!([
+            {"name": "default", "runner": "wine", "prefix": "/pfx/default", "games": []},
+            {"name": "native", "runner": "native", "games": ["openmw"]}
+        ])
+    );
+}
+
+#[test]
+fn status_json_lists_games_and_sessions() {
+    let mut session = proc(7, "winetricks", None);
+    session.tags.owner = Some(Owner::Session("tricks:default:1".into()));
+    let processes = [
+        proc(1, "Wow.exe", Some("wow")),
+        proc(2, "wineserver", Some("wow")),
+        session,
+        proc(9, "bash", None),
+    ];
+
+    let value = json(|out| status_json(&processes, out));
+
+    assert_eq!(
+        value,
+        serde_json::json!([
+            {"name": "wow", "kind": "game", "pids": [1, 2], "commands": ["Wow.exe"]},
+            {"name": "tricks:default:1", "kind": "session", "pids": [7], "commands": ["winetricks"]}
+        ])
+    );
+}
+
+#[test]
+fn check_preflights_valid_profiles() {
+    let mut catalog = catalog(Path::new("/bin/true"));
+    catalog.profiles[1].wrappers = vec!["nope".into()];
+
+    let (out, result) = output(|out| {
+        check(
+            &catalog,
+            &ctx(),
+            &launch_ctx(),
+            &CheckTarget::Game("openmw".into()),
+            out,
+        )
+    });
+
+    assert!(matches!(result, Err(AppError::CheckFailed(_))), "{out}");
+    assert!(out.contains("wrapper `nope` not found"), "{out}");
 }

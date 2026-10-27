@@ -262,6 +262,22 @@ pub fn prepare(
     })
 }
 
+/// Checks what a launch with `profile` needs without launching anything: the
+/// runner (and Proton build), wrappers and anti-cheat runtimes. Empty when all
+/// is in place.
+pub fn preflight(profile: &Profile, ctx: &LaunchContext) -> Vec<String> {
+    let prefix = profile
+        .prefix
+        .as_deref()
+        .filter(|_| profile.runner != Runner::Native)
+        .map(|prefix| paths::expand_tilde(prefix, ctx.home));
+    let mut problems = runner::command(profile, prefix.as_deref(), None, false, ctx)
+        .err()
+        .unwrap_or_default();
+    resolve_wrappers(&profile.wrappers, ctx.search_path, &mut problems);
+    problems
+}
+
 /// Resolves `execute`'s target: paths must exist; bare names go through `PATH`
 /// for native, and straight to wine otherwise (`winecfg`, `regedit`, ...).
 fn execute_program(

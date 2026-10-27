@@ -125,17 +125,29 @@ fn list_and_profiles_show_examples() {
 }
 
 #[test]
-fn check_examples_has_only_warnings() {
+fn check_examples_only_misses_installed_software() {
     let home = tempfile::tempdir().unwrap();
     config_with_examples(home.path());
 
     let output = lootrs(home.path(), &["check"]);
     let stdout = String::from_utf8(output.stdout).unwrap();
 
+    assert!(
+        stdout.contains("checked 3 games and 3 profiles"),
+        "{stdout}"
+    );
+    let errors: Vec<&str> = stdout.lines().filter(|l| l.starts_with("error:")).collect();
     if cfg!(all(feature = "wine", feature = "umu")) {
-        assert!(output.status.success(), "{stdout}");
+        // The files are valid; preflight only misses runners and Proton
+        // builds that aren't installed in this temporary home.
         assert!(
-            stdout.contains("checked 3 games and 3 profiles: 0 errors"),
+            errors
+                .iter()
+                .all(|e| e.contains("not found") || e.contains("no Proton build")),
+            "{stdout}"
+        );
+        assert!(
+            errors.iter().any(|e| e.contains("no Proton build")),
             "{stdout}"
         );
     } else {

@@ -1,4 +1,4 @@
-//! Command dispatch. Commands not built yet report their milestone (see `docs/PLAN.md`).
+//! Command dispatch.
 
 use std::{
     io::{self, Write},
@@ -6,7 +6,11 @@ use std::{
 };
 
 use liblootrs::{
-    launch::LaunchError, model::ValidationContext, prefix::PrefixError, process, store::Catalog,
+    launch::{LaunchContext, LaunchError},
+    model::ValidationContext,
+    prefix::PrefixError,
+    process,
+    store::Catalog,
 };
 
 use crate::settings::{Action, LaunchMode, Settings};
@@ -21,12 +25,6 @@ mod tests;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
-    #[error("`{command}` is not implemented yet (planned for {milestone})")]
-    NotImplemented {
-        command: &'static str,
-        milestone: &'static str,
-    },
-
     #[error("no game named `{0}` in games.toml")]
     UnknownGame(String),
 
@@ -75,12 +73,16 @@ pub enum AppError {
 }
 
 impl AppError {
+    /// Stdout was closed early (`lootrs list | head`); not worth reporting.
+    pub fn is_broken_pipe(&self) -> bool {
+        matches!(self, Self::Output(err) if err.kind() == io::ErrorKind::BrokenPipe)
+    }
+
     /// Process exit code: 1 runtime failure, 2 validation/usage,
     /// 3 not running, 4 already running.
     pub fn exit_code(&self) -> u8 {
         match self {
-            Self::NotImplemented { .. }
-            | Self::Spawn { .. }
+            Self::Spawn { .. }
             | Self::RunLog(_)
             | Self::Detach(_)
             | Self::NoLogs(_)
@@ -144,20 +146,27 @@ pub fn run(settings: &Settings) -> Result<u8, AppError> {
             done(commands::logs(settings, game, *path_only, &mut out))
         }
         Action::List { json: false } => done(commands::list(&load_catalog(settings), &mut out)),
+        Action::List { json: true } => done(commands::list_json(
+            &load_catalog(settings),
+            &process::scan(),
+            &mut out,
+        )),
         Action::Profiles { json: false } => {
             done(commands::profiles(&load_catalog(settings), &mut out))
+        }
+        Action::Profiles { json: true } => {
+            done(commands::profiles_json(&load_catalog(settings), &mut out))
         }
         Action::Check { target } => done(commands::check(
             &Catalog::load(&settings.dirs.config),
             &validation_context(settings),
+            &launch_context(settings),
             target,
             &mut out,
         )),
-        Action::List { json: true }
-        | Action::Profiles { json: true }
-        | Action::Status { json: true } => not_implemented("--json", "M7"),
         Action::Stop { game } => done(commands::stop(settings, game, &mut out)),
         Action::Status { json: false } => done(commands::status(&process::scan(), &mut out)),
+        Action::Status { json: true } => done(commands::status_json(&process::scan(), &mut out)),
         Action::Killall { everything, yes } => done(commands::killall(
             &process::scan(),
             *everything,
@@ -203,14 +212,24 @@ fn load_catalog(settings: &Settings) -> Catalog {
     catalog
 }
 
+/// Launch context for preflight checks (nothing is launched, so no run directory).
+pub fn launch_context(settings: &Settings) -> LaunchContext<'_> {
+    LaunchContext {
+        home: &settings.dirs.home,
+        search_path: &settings.search_path,
+        debug: false,
+        extra_args: &[],
+        artifacts_dir: &settings.logging.dir,
+        battleye_runtime: settings.anticheat.battleye.as_deref(),
+        eac_runtime: settings.anticheat.eac.as_deref(),
+        umu_runtime_update: settings.umu_runtime_update,
+    }
+}
+
 pub fn validation_context(settings: &Settings) -> ValidationContext<'_> {
     ValidationContext {
         home: &settings.dirs.home,
         battleye_runtime: settings.anticheat.battleye.is_some(),
         eac_runtime: settings.anticheat.eac.is_some(),
     }
-}
-
-fn not_implemented(command: &'static str, milestone: &'static str) -> Result<u8, AppError> {
-    Err(AppError::NotImplemented { command, milestone })
 }

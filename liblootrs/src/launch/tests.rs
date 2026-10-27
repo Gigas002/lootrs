@@ -265,3 +265,45 @@ fn tricks_need_a_prefix_runner() {
 
     assert_eq!(err.problems, ["`tricks` needs a wine or umu profile"]);
 }
+
+#[test]
+fn preflight_reports_runner_and_wrapper_problems() {
+    let fx = Fixture::new();
+    fx.executable("bin/mangohud");
+    let ok = Profile {
+        wrappers: vec!["mangohud --dlsym".into()],
+        ..Profile::new("p", Runner::Native)
+    };
+    let broken = Profile {
+        wrappers: vec!["nope".into()],
+        anticheat: crate::model::Anticheat {
+            battleye: true,
+            eac: false,
+        },
+        ..Profile::new("p", Runner::Native)
+    };
+
+    assert!(preflight(&ok, &fx.ctx(&[])).is_empty());
+    // Native ignores anti-cheat; only the wrapper is a problem.
+    assert_eq!(
+        preflight(&broken, &fx.ctx(&[])),
+        ["wrapper `nope` not found"]
+    );
+}
+
+#[cfg(feature = "wine")]
+#[test]
+fn preflight_finds_missing_wine() {
+    let fx = Fixture::new();
+    let profile = Profile {
+        prefix: Some("/pfx".into()),
+        ..Profile::new("w", Runner::Wine)
+    };
+
+    assert_eq!(
+        preflight(&profile, &fx.ctx(&[])),
+        ["`wine` not found in PATH; install wine or set `[wine].path`"]
+    );
+    fx.executable("bin/wine");
+    assert!(preflight(&profile, &fx.ctx(&[])).is_empty());
+}
