@@ -60,11 +60,13 @@ fn json_output_is_not_implemented_yet() {
     );
 }
 
+#[cfg(not(feature = "tui"))]
 #[test]
-fn tui_points_at_its_milestone() {
+fn tui_needs_the_feature() {
     let err = run(&settings(Action::Tui)).unwrap_err();
 
-    assert!(err.to_string().contains("M6"));
+    assert_eq!(err.exit_code(), 2);
+    assert!(err.to_string().contains("built without the `tui` feature"));
 }
 
 #[test]

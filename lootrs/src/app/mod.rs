@@ -13,6 +13,8 @@ use crate::settings::{Action, LaunchMode, Settings};
 
 pub mod commands;
 pub mod supervisor;
+#[cfg(feature = "tui")]
+pub mod tui;
 
 #[cfg(test)]
 mod tests;
@@ -180,7 +182,13 @@ pub fn run(settings: &Settings) -> Result<u8, AppError> {
             &[],
             &mut out,
         ),
-        Action::Tui => not_implemented(action.name(), "M6"),
+        #[cfg(feature = "tui")]
+        Action::Tui => tui::run(settings),
+        // The CLI requires a subcommand without the `tui` feature.
+        #[cfg(not(feature = "tui"))]
+        Action::Tui => Err(AppError::Invalid(
+            "lootrs was built without the `tui` feature; run a subcommand (see --help)".into(),
+        )),
     }?;
     out.flush()?;
     Ok(code)

@@ -97,3 +97,30 @@ fn empty_artifacts_are_removed() {
     assert!(!empty.artifacts.exists());
     assert!(full.artifacts.is_dir());
 }
+
+#[test]
+fn tail_returns_last_lines() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("run.log");
+    let content: String = (1..=50).map(|i| format!("line {i}\n")).collect();
+    std::fs::write(&path, content).unwrap();
+
+    assert_eq!(tail(&path, 2).unwrap(), ["line 49", "line 50"]);
+    assert_eq!(tail(&path, 100).unwrap().len(), 50);
+    assert!(tail(&dir.path().join("missing.log"), 5).is_err());
+}
+
+#[test]
+fn tail_of_a_big_file_drops_the_cut_line() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("big.log");
+    let line = "x".repeat(1000);
+    let content: String = (0..400).map(|i| format!("{i} {line}\n")).collect();
+    std::fs::write(&path, content).unwrap();
+
+    let lines = tail(&path, 1000).unwrap();
+
+    assert!(lines.len() < 400);
+    assert!(lines.iter().all(|l| l.ends_with(&line)));
+    assert!(lines.last().unwrap().starts_with("399 "));
+}

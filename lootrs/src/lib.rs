@@ -5,4 +5,6 @@ pub mod cli;
 pub mod config;
 pub mod logger;
 pub mod settings;
+#[cfg(feature = "tui")]
+pub mod ui;
 pub mod utils;

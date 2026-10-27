@@ -17,6 +17,7 @@ mod tests;
 
 pub const DEFAULT_LOG_KEEP: usize = 10;
 pub const DEFAULT_STOP_TIMEOUT_SECS: u64 = 5;
+pub const DEFAULT_PAGER: &str = "less";
 
 /// Values taken from the command line, already converted from `clap` types.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -129,6 +130,8 @@ pub struct Settings {
     pub stop_timeout: Duration,
     pub umu_runtime_update: bool,
     pub anticheat: AnticheatRuntimes,
+    /// `$PAGER` (may include arguments), `less` by default; the TUI opens logs with it.
+    pub pager: String,
     pub action: Action,
 }
 
@@ -192,6 +195,10 @@ impl Settings {
                     .collect()
             })
             .unwrap_or_default();
+        let pager = lookup("PAGER")
+            .map(|pager| pager.to_string_lossy().trim().to_owned())
+            .filter(|pager| !pager.is_empty())
+            .unwrap_or_else(|| DEFAULT_PAGER.to_owned());
         let xdg = XdgDirs::from_lookup(lookup)?;
         let defaults = AppDirs::new(&xdg);
 
@@ -267,6 +274,7 @@ impl Settings {
                 battleye: from_config("battleye_runtime", file.battleye_runtime)?,
                 eac: from_config("eac_runtime", file.eac_runtime)?,
             },
+            pager,
             action,
         })
     }

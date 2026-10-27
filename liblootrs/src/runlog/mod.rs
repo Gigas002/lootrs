@@ -89,6 +89,28 @@ pub fn latest(logs_dir: &Path, kind: RunKind) -> Option<PathBuf> {
     path.is_file().then_some(path)
 }
 
+/// The last `lines` lines of a log, reading at most the last 256 KiB.
+pub fn tail(path: &Path, lines: usize) -> io::Result<Vec<String>> {
+    use std::io::{Read, Seek, SeekFrom};
+
+    const MAX_BYTES: u64 = 256 * 1024;
+    let mut file = File::open(path)?;
+    let len = file.metadata()?.len();
+    let start = len.saturating_sub(MAX_BYTES);
+    file.seek(SeekFrom::Start(start))?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)?;
+
+    let text = String::from_utf8_lossy(&bytes);
+    let mut all: Vec<&str> = text.lines().collect();
+    // A partial first line when the file was cut.
+    if start > 0 && !all.is_empty() {
+        all.remove(0);
+    }
+    let skip = all.len().saturating_sub(lines);
+    Ok(all[skip..].iter().map(|line| (*line).to_owned()).collect())
+}
+
 /// Removes the artifacts directory if the runner wrote nothing into it.
 pub fn remove_if_empty(dir: &Path) {
     // Fails harmlessly when the directory is not empty.
