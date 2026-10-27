@@ -29,6 +29,13 @@ fn level_filter_mapping() {
 }
 
 #[test]
+fn stderr_hides_info_by_default() {
+    assert_eq!(stderr_filter(LogLevel::Info), LevelFilter::WARN);
+    assert_eq!(stderr_filter(LogLevel::Error), LevelFilter::ERROR);
+    assert_eq!(stderr_filter(LogLevel::Debug), LevelFilter::DEBUG);
+}
+
+#[test]
 fn writes_filtered_events_to_log_dir() {
     let root = tempfile::tempdir().unwrap();
     let settings = settings(root.path(), LogLevel::Info);

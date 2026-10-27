@@ -10,7 +10,7 @@ use tracing_appender::{
 use tracing_subscriber::{
     filter::LevelFilter,
     fmt::{self, FmtContext, FormatEvent, FormatFields, format::Writer},
-    layer::SubscriberExt,
+    layer::{Layer, SubscriberExt},
     registry::LookupSpan,
 };
 
@@ -64,6 +64,7 @@ pub fn subscriber(
             .with_writer(io::stderr)
             .with_ansi(false)
             .event_format(CliFormat)
+            .with_filter(stderr_filter(logging.level))
     });
 
     let subscriber = tracing_subscriber::registry()
@@ -72,6 +73,15 @@ pub fn subscriber(
         .with(stderr_layer);
 
     Ok((subscriber, guard))
+}
+
+/// The terminal gets warnings and errors; `info` stays in the file because
+/// commands print their own results. `-v`/`-vv` show debug/trace there too.
+pub fn stderr_filter(level: LogLevel) -> LevelFilter {
+    match level {
+        LogLevel::Info => LevelFilter::WARN,
+        level => level_filter(level),
+    }
 }
 
 pub fn level_filter(level: LogLevel) -> LevelFilter {

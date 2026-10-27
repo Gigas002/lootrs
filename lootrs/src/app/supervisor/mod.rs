@@ -22,6 +22,7 @@ use liblootrs::{
     diag::{self, SystemInfo},
     launch::{self, LaunchContext, LaunchSpec, Tag, Target},
     model::{Issue, Profile, Runner, Severity},
+    process::{self, Owner},
     runlog::{self, RunKind, RunLog},
     store::Catalog,
 };
@@ -238,6 +239,11 @@ fn supervise(
     };
     check_issues(&issues)?;
     let profile = profile.expect("validation reports a missing profile");
+    if let Request::Game { name } = request
+        && process::is_running(&process::scan(), &Owner::Game(name.to_owned()))
+    {
+        return Err(AppError::AlreadyRunning(name.to_owned()));
+    }
     if profile.runner == Runner::Wine && (profile.dxvk.is_some() || profile.vkd3d.is_some()) {
         tracing::warn!("DXVK/VKD3D are not linked into the prefix yet (planned for M4)");
     }

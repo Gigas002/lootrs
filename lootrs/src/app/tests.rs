@@ -14,13 +14,22 @@ fn settings(action: Action) -> Settings {
 
 #[test]
 fn unimplemented_commands_fail_with_runtime_code() {
-    let err = run(&settings(Action::Status { json: false })).unwrap_err();
+    let err = run(&settings(Action::Init {
+        profile: "p".into(),
+    }))
+    .unwrap_err();
 
     assert_eq!(err.exit_code(), 1);
     assert_eq!(
         err.to_string(),
-        "`status` is not implemented yet (planned for M3)"
+        "`init` is not implemented yet (planned for M4)"
     );
+}
+
+#[test]
+fn process_state_exit_codes() {
+    assert_eq!(AppError::NotRunning("g".into()).exit_code(), 3);
+    assert_eq!(AppError::AlreadyRunning("g".into()).exit_code(), 4);
 }
 
 #[test]

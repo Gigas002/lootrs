@@ -28,4 +28,5 @@ fn plural_forms() {
     assert_eq!(plural(0, "error"), "0 errors");
     assert_eq!(plural(1, "error"), "1 error");
     assert_eq!(plural(2, "warning"), "2 warnings");
+    assert_eq!(plural(3, "process"), "3 processes");
 }

@@ -49,21 +49,18 @@ fn version_flag() {
 #[test]
 fn command_logs_to_stderr_and_xdg_state_dir() {
     let home = tempfile::tempdir().unwrap();
-    let output = lootrs(home.path(), &["status"]);
+    let output = lootrs(home.path(), &["init", "-p", "x"]);
 
     assert_eq!(output.status.code(), Some(1));
     let stderr = String::from_utf8(output.stderr).unwrap();
-    assert!(
-        stderr.contains("`status` is not implemented yet"),
-        "{stderr}"
-    );
+    assert!(stderr.contains("`init` is not implemented yet"), "{stderr}");
 
     let log_dir = home.path().join(".local/state/lootrs/logs");
     let logs: String = std::fs::read_dir(&log_dir)
         .unwrap()
         .map(|entry| std::fs::read_to_string(entry.unwrap().path()).unwrap())
         .collect();
-    assert!(logs.contains("`status` is not implemented yet"));
+    assert!(logs.contains("`init` is not implemented yet"));
 }
 
 #[test]
@@ -321,4 +318,66 @@ fn run_unknown_game() {
     let output = lootrs(home.path(), &["run", "nope"]);
 
     assert_eq!(output.status.code(), Some(2));
+}
+
+/// A native game named `name` that runs until stopped.
+fn long_game(home: &Path, name: &str) {
+    let config = home.join(".config/lootrs");
+    std::fs::create_dir_all(config.join("profiles")).unwrap();
+    std::fs::create_dir_all(home.join("game")).unwrap();
+    let script = home.join("game/long.sh");
+    std::fs::write(&script, "#!/bin/sh\nsleep 60 &\nwait\n").unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::write(
+        config.join("games.toml"),
+        format!("[[game]]\nname = \"{name}\"\nexe = \"~/game/long.sh\"\nprofile = \"native\"\n"),
+    )
+    .unwrap();
+    std::fs::write(
+        config.join("profiles/native.toml"),
+        "name = \"native\"\nrunner = \"native\"\n",
+    )
+    .unwrap();
+}
+
+#[test]
+fn run_status_stop_cycle() {
+    let home = tempfile::tempdir().unwrap();
+    // Unique per test process: `status` and tags are global to the user.
+    let name = format!("long-{}", std::process::id());
+    long_game(home.path(), &name);
+
+    assert!(lootrs(home.path(), &["run", &name]).status.success());
+
+    let status = String::from_utf8(lootrs(home.path(), &["status"]).stdout).unwrap();
+    assert!(status.contains(&name), "{status}");
+
+    let again = lootrs(home.path(), &["run", &name]);
+    assert_eq!(again.status.code(), Some(4));
+    assert!(
+        String::from_utf8(again.stderr)
+            .unwrap()
+            .contains("already running")
+    );
+
+    let stop = lootrs(home.path(), &["stop", &name]);
+    assert!(stop.status.success(), "{stop:?}");
+    assert!(
+        String::from_utf8(stop.stdout)
+            .unwrap()
+            .starts_with(&format!("stopped `{name}`"))
+    );
+
+    let status = String::from_utf8(lootrs(home.path(), &["status"]).stdout).unwrap();
+    assert!(!status.contains(&name), "{status}");
+    assert_eq!(lootrs(home.path(), &["stop", &name]).status.code(), Some(3));
+
+    let logs = home
+        .path()
+        .join(format!(".local/state/lootrs/logs/games/{name}"));
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !read_latest(&logs).contains("=== exit: signal 15") {
+        assert!(Instant::now() < deadline, "{}", read_latest(&logs));
+        std::thread::sleep(Duration::from_millis(50));
+    }
 }

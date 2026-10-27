@@ -1,6 +1,9 @@
 use std::{collections::BTreeMap, path::Path};
 
-use liblootrs::model::{Game, Profile, Runner};
+use liblootrs::{
+    model::{Game, Profile, Runner},
+    process::Tags,
+};
 
 use super::*;
 
@@ -192,4 +195,115 @@ fn check_game_explains_broken_profile_file() {
     assert!(out.contains("native.toml: invalid TOML"), "{out}");
     assert!(!out.contains("other.toml"), "{out}");
     assert!(out.contains("profile `native` does not exist"), "{out}");
+}
+
+fn proc(pid: u32, comm: &str, owner: Option<&str>) -> Process {
+    Process {
+        pid,
+        comm: comm.into(),
+        exe: None,
+        tags: Tags {
+            owner: owner.map(|name| Owner::Game(name.into())),
+            prefix: None,
+        },
+    }
+}
+
+#[test]
+fn status_groups_by_owner() {
+    let processes = [
+        proc(1, "Wow.exe", Some("wow")),
+        proc(2, "wineserver", Some("wow")),
+        proc(3, "start.exe", Some("wow")),
+        proc(4, "Wow.exe", Some("wow")),
+        proc(5, "wineserver", Some("gone")),
+        proc(6, "bash", None),
+    ];
+
+    let (out, result) = output(|out| status(&processes, out));
+
+    result.unwrap();
+    assert_eq!(
+        out,
+        "NAME  PROCS  COMMANDS\nwow   4      Wow.exe, start.exe\n"
+    );
+    assert_eq!(output(|out| status(&[], out)).0, "nothing running\n");
+}
+
+#[test]
+fn status_truncates_command_list() {
+    let processes: Vec<Process> = (1..=6)
+        .map(|pid| proc(pid, &format!("p{pid}"), Some("g")))
+        .collect();
+
+    let (out, _) = output(|out| status(&processes, out));
+
+    assert!(out.ends_with("g     6      p1, p2, p3, p4, …\n"), "{out}");
+}
+
+fn killall_run(
+    processes: &[Process],
+    everything: bool,
+    yes: bool,
+    answer: &str,
+) -> (String, Result<(), AppError>, bool) {
+    let mut killed = false;
+    let (out, result) = output(|out| {
+        killall(
+            processes,
+            everything,
+            yes,
+            &mut answer.as_bytes(),
+            out,
+            || {
+                killed = true;
+                Outcome {
+                    signaled: 2,
+                    killed: 1,
+                }
+            },
+        )
+    });
+    (out, result, killed)
+}
+
+#[test]
+fn killall_tagged_needs_no_confirmation() {
+    let processes = [proc(1, "Wow.exe", Some("wow")), proc(2, "Steam.exe", None)];
+
+    let (out, result, killed) = killall_run(&processes, false, false, "");
+
+    result.unwrap();
+    assert!(killed);
+    assert_eq!(out, "stopped 2 processes, 1 force-killed\n");
+}
+
+#[test]
+fn killall_everything_asks_first() {
+    let processes = [proc(1, "Wow.exe", Some("wow")), proc(2, "Steam.exe", None)];
+
+    let (out, result, killed) = killall_run(&processes, true, false, "n\n");
+    assert!(matches!(result, Err(AppError::Cancelled)));
+    assert!(!killed);
+    assert!(out.contains(
+        "This kills 2 processes including processes lootrs did not start:\n  Steam.exe, Wow.exe"
+    ));
+
+    let (_, result, killed) = killall_run(&processes, true, false, "y\n");
+    result.unwrap();
+    assert!(killed);
+
+    let (out, result, killed) = killall_run(&processes, true, true, "");
+    result.unwrap();
+    assert!(killed);
+    assert!(!out.contains("Continue?"));
+}
+
+#[test]
+fn killall_nothing() {
+    let (out, result, killed) = killall_run(&[proc(1, "bash", None)], true, false, "");
+
+    result.unwrap();
+    assert!(!killed);
+    assert_eq!(out, "nothing to kill\n");
 }

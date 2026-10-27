@@ -1,9 +1,13 @@
 //! Command handlers. Each writes its output to `out` so tests can capture it.
 
-use std::io::{self, Write};
+use std::{
+    collections::BTreeSet,
+    io::{self, BufRead, Write},
+};
 
 use liblootrs::{
     model::{Issue, Severity, Subject, ValidationContext},
+    process::{self, Outcome, Owner, Process},
     runlog::{self, RunKind},
     store::{self, Catalog},
 };
@@ -72,6 +76,112 @@ pub fn profiles(catalog: &Catalog, out: &mut impl Write) -> Result<(), AppError>
 
     write!(out, "{}", table(std::iter::once(header).chain(rows)))?;
     Ok(())
+}
+
+/// How many process names `status` shows per owner.
+const STATUS_COMMANDS: usize = 4;
+
+/// `lootrs status`: running games and sessions.
+pub fn status(processes: &[Process], out: &mut impl Write) -> Result<(), AppError> {
+    let running = process::running(processes);
+    if running.is_empty() {
+        writeln!(out, "nothing running")?;
+        return Ok(());
+    }
+
+    let header = ["NAME", "PROCS", "COMMANDS"].map(String::from).to_vec();
+    let rows = running.iter().map(|(owner, group)| {
+        let mut commands: Vec<&str> = Vec::new();
+        for process in group.iter().filter(|p| !p.is_wine_infrastructure()) {
+            if !commands.contains(&process.comm.as_str()) {
+                commands.push(&process.comm);
+            }
+        }
+        let mut shown = commands
+            .iter()
+            .take(STATUS_COMMANDS)
+            .copied()
+            .collect::<Vec<_>>()
+            .join(", ");
+        if commands.len() > STATUS_COMMANDS {
+            shown.push_str(", …");
+        }
+        vec![owner.to_string(), group.len().to_string(), shown]
+    });
+
+    write!(out, "{}", table(std::iter::once(header).chain(rows)))?;
+    Ok(())
+}
+
+/// `lootrs stop`: terminates a game's processes.
+pub fn stop(settings: &Settings, game: &str, out: &mut impl Write) -> Result<(), AppError> {
+    let owner = Owner::Game(game.to_owned());
+    if !process::is_running(&process::scan(), &owner) {
+        return Err(AppError::NotRunning(game.to_owned()));
+    }
+
+    let outcome = process::terminate(
+        process::scan,
+        |processes| process::stop_targets(processes, &owner),
+        settings.stop_timeout,
+    );
+    tracing::info!(?outcome, "stopped `{game}`");
+    writeln!(out, "stopped `{game}` ({})", describe(outcome))?;
+    Ok(())
+}
+
+/// `lootrs killall`: everything lootrs started; with `everything`, any
+/// wine/Proton process of this user too (asks first unless `yes`).
+///
+/// `kill` performs the termination, so the selection and prompt are testable
+/// without killing anything.
+pub fn killall(
+    processes: &[Process],
+    everything: bool,
+    yes: bool,
+    input: &mut impl BufRead,
+    out: &mut impl Write,
+    kill: impl FnOnce() -> Outcome,
+) -> Result<(), AppError> {
+    let targets = process::killall_targets(processes, everything);
+    if targets.is_empty() {
+        writeln!(out, "nothing to kill")?;
+        return Ok(());
+    }
+
+    if everything && !yes {
+        let names: BTreeSet<&str> = processes
+            .iter()
+            .filter(|p| targets.contains(&p.pid))
+            .map(|p| p.comm.as_str())
+            .collect();
+        writeln!(
+            out,
+            "This kills {} including processes lootrs did not start:\n  {}",
+            plural(targets.len(), "process"),
+            names.into_iter().collect::<Vec<_>>().join(", ")
+        )?;
+        write!(out, "Continue? [y/N] ")?;
+        out.flush()?;
+        let mut answer = String::new();
+        input.read_line(&mut answer)?;
+        if !matches!(answer.trim(), "y" | "Y" | "yes") {
+            return Err(AppError::Cancelled);
+        }
+    }
+
+    let outcome = kill();
+    tracing::info!(?outcome, everything, "killall");
+    writeln!(out, "stopped {}", describe(outcome))?;
+    Ok(())
+}
+
+fn describe(outcome: Outcome) -> String {
+    let mut text = plural(outcome.signaled, "process");
+    if outcome.killed > 0 {
+        text += &format!(", {} force-killed", outcome.killed);
+    }
+    text
 }
 
 /// `lootrs logs`: the latest run log of a game, or its path.

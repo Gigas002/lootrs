@@ -40,11 +40,11 @@ where
     out
 }
 
-/// `1 error`, `2 warnings`.
+/// `1 error`, `2 warnings`, `3 processes`.
 pub fn plural(count: usize, noun: &str) -> String {
-    if count == 1 {
-        format!("{count} {noun}")
-    } else {
-        format!("{count} {noun}s")
+    match (count, noun.ends_with('s')) {
+        (1, _) => format!("{count} {noun}"),
+        (_, true) => format!("{count} {noun}es"),
+        (_, false) => format!("{count} {noun}s"),
     }
 }

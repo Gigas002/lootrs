@@ -5,7 +5,7 @@ use std::{
     path::PathBuf,
 };
 
-use liblootrs::{launch::LaunchError, model::ValidationContext, store::Catalog};
+use liblootrs::{launch::LaunchError, model::ValidationContext, process, store::Catalog};
 
 use crate::settings::{Action, Settings};
 
@@ -54,6 +54,15 @@ pub enum AppError {
     #[error("no run logs for `{0}` yet")]
     NoLogs(String),
 
+    #[error("`{0}` is not running")]
+    NotRunning(String),
+
+    #[error("`{0}` is already running; stop it first with `lootrs stop {0}`")]
+    AlreadyRunning(String),
+
+    #[error("cancelled")]
+    Cancelled,
+
     #[error("failed to write output: {0}")]
     Output(#[from] io::Error),
 }
@@ -68,12 +77,15 @@ impl AppError {
             | Self::RunLog(_)
             | Self::Detach(_)
             | Self::NoLogs(_)
+            | Self::Cancelled
             | Self::Output(_) => 1,
             Self::UnknownGame(_)
             | Self::UnknownProfile(_)
             | Self::CheckFailed(_)
             | Self::Invalid(_)
             | Self::Preflight(_) => 2,
+            Self::NotRunning(_) => 3,
+            Self::AlreadyRunning(_) => 4,
             Self::Supervisor { code, .. } => *code,
         }
     }
@@ -132,12 +144,25 @@ pub fn run(settings: &Settings) -> Result<u8, AppError> {
             target,
             &mut out,
         )),
-        Action::List { json: true } | Action::Profiles { json: true } => {
-            not_implemented("--json", "M7")
-        }
-        Action::Stop { .. } | Action::Killall { .. } | Action::Status { .. } => {
-            not_implemented(action.name(), "M3")
-        }
+        Action::List { json: true }
+        | Action::Profiles { json: true }
+        | Action::Status { json: true } => not_implemented("--json", "M7"),
+        Action::Stop { game } => done(commands::stop(settings, game, &mut out)),
+        Action::Status { json: false } => done(commands::status(&process::scan(), &mut out)),
+        Action::Killall { everything, yes } => done(commands::killall(
+            &process::scan(),
+            *everything,
+            *yes,
+            &mut io::stdin().lock(),
+            &mut out,
+            || {
+                process::terminate(
+                    process::scan,
+                    |processes| process::killall_targets(processes, *everything),
+                    settings.stop_timeout,
+                )
+            },
+        )),
         Action::Init { .. } | Action::Tricks { .. } => not_implemented(action.name(), "M4"),
         Action::Tui => not_implemented(action.name(), "M6"),
     }?;
