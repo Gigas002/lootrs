@@ -61,3 +61,27 @@ fn unwritable_log_dir_is_an_error() {
 
     assert!(matches!(result, Err(LoggerError::CreateDir(_))));
 }
+
+#[test]
+fn cli_format_is_plain() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("out.log");
+    let file = std::fs::File::create(&path).unwrap();
+    let subscriber = tracing_subscriber::registry().with(
+        fmt::layer()
+            .with_writer(file)
+            .with_ansi(false)
+            .event_format(CliFormat),
+    );
+
+    tracing::subscriber::with_default(subscriber, || {
+        let _span = tracing::info_span!("command", name = "list").entered();
+        tracing::warn!("broken file");
+        tracing::error!(code = 2, "failed");
+    });
+
+    assert_eq!(
+        std::fs::read_to_string(path).unwrap(),
+        "lootrs: warning: broken file\nlootrs: error: failed code=2\n"
+    );
+}

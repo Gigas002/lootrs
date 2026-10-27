@@ -1,13 +1,18 @@
 //! `tracing` subscriber setup: a daily-rotated file log, plus stderr for CLI commands.
 
-use std::io;
+use std::{fmt as std_fmt, io};
 
-use tracing::Subscriber;
+use tracing::{Event, Level, Subscriber};
 use tracing_appender::{
     non_blocking::WorkerGuard,
     rolling::{InitError, RollingFileAppender, Rotation},
 };
-use tracing_subscriber::{filter::LevelFilter, fmt, layer::SubscriberExt};
+use tracing_subscriber::{
+    filter::LevelFilter,
+    fmt::{self, FmtContext, FormatEvent, FormatFields, format::Writer},
+    layer::SubscriberExt,
+    registry::LookupSpan,
+};
 
 use crate::{config::LogLevel, settings::Settings};
 
@@ -58,8 +63,7 @@ pub fn subscriber(
         fmt::layer()
             .with_writer(io::stderr)
             .with_ansi(false)
-            .without_time()
-            .with_target(false)
+            .event_format(CliFormat)
     });
 
     let subscriber = tracing_subscriber::registry()
@@ -77,5 +81,32 @@ pub fn level_filter(level: LogLevel) -> LevelFilter {
         LogLevel::Info => LevelFilter::INFO,
         LogLevel::Debug => LevelFilter::DEBUG,
         LogLevel::Trace => LevelFilter::TRACE,
+    }
+}
+
+/// Stderr format for CLI commands: `lootrs: warning: message`, no spans or timestamps.
+pub struct CliFormat;
+
+impl<S, N> FormatEvent<S, N> for CliFormat
+where
+    S: Subscriber + for<'a> LookupSpan<'a>,
+    N: for<'a> FormatFields<'a> + 'static,
+{
+    fn format_event(
+        &self,
+        ctx: &FmtContext<'_, S, N>,
+        mut writer: Writer<'_>,
+        event: &Event<'_>,
+    ) -> std_fmt::Result {
+        let level = match *event.metadata().level() {
+            Level::ERROR => "error",
+            Level::WARN => "warning",
+            Level::INFO => "info",
+            Level::DEBUG => "debug",
+            Level::TRACE => "trace",
+        };
+        write!(writer, "lootrs: {level}: ")?;
+        ctx.field_format().format_fields(writer.by_ref(), event)?;
+        writeln!(writer)
     }
 }

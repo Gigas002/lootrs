@@ -16,4 +16,9 @@ wine = []
 umu = []
 
 [dependencies]
+serde.workspace = true
 thiserror.workspace = true
+toml.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
