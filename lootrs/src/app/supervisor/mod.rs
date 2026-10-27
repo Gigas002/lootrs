@@ -7,6 +7,7 @@
 //! `ok\t<pid>\t<log>` or `error\t<exit code>` followed by the message.
 
 use std::{
+    collections::BTreeMap,
     ffi::OsString,
     fs::File,
     io::{self, BufRead, BufReader, Read, Write},
@@ -22,6 +23,7 @@ use liblootrs::{
     diag::{self, SystemInfo},
     launch::{self, LaunchContext, LaunchSpec, Tag, Target},
     model::{Issue, Profile, Runner, Severity},
+    prefix::{self, EnsureContext, PrefixError},
     process::{self, Owner},
     runlog::{self, RunKind, RunLog},
     store::Catalog,
@@ -40,8 +42,17 @@ const DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
 /// What to launch, independent of how it was requested.
 #[derive(Debug, Clone, Copy)]
 pub enum Request<'a> {
-    Game { name: &'a str },
-    Execute { profile: &'a str, program: &'a Path },
+    Game {
+        name: &'a str,
+    },
+    Execute {
+        profile: &'a str,
+        program: &'a Path,
+    },
+    Tricks {
+        profile: &'a str,
+        verbs: &'a [String],
+    },
 }
 
 /// A started process.
@@ -105,6 +116,7 @@ fn describe(request: Request) -> String {
         Request::Execute { profile, program } => {
             format!("`{}` with profile `{profile}`", program.display())
         }
+        Request::Tricks { profile, .. } => format!("winetricks for profile `{profile}`"),
     }
 }
 
@@ -236,6 +248,17 @@ fn supervise(
                 RunKind::Execute(profile),
             )
         }
+        Request::Tricks { profile, verbs } => {
+            let found = catalog
+                .profile(profile)
+                .ok_or_else(|| AppError::UnknownProfile(profile.to_owned()))?;
+            (
+                Target::Tricks { verbs },
+                Some(found),
+                found.validate(&ctx),
+                RunKind::Tricks(profile),
+            )
+        }
     };
     check_issues(&issues)?;
     let profile = profile.expect("validation reports a missing profile");
@@ -243,9 +266,6 @@ fn supervise(
         && process::is_running(&process::scan(), &Owner::Game(name.to_owned()))
     {
         return Err(AppError::AlreadyRunning(name.to_owned()));
-    }
-    if profile.runner == Runner::Wine && (profile.dxvk.is_some() || profile.vkd3d.is_some()) {
-        tracing::warn!("DXVK/VKD3D are not linked into the prefix yet (planned for M4)");
     }
 
     let started_at = Local::now();
@@ -261,7 +281,18 @@ fn supervise(
     let tag = match request {
         Request::Game { name } => Tag::Game(name.to_owned()),
         Request::Execute { profile, .. } => Tag::Session(format!("execute:{profile}:{stamp}")),
+        Request::Tricks { profile, .. } => Tag::Session(format!("tricks:{profile}:{stamp}")),
     };
+
+    let prefix = match ensure_prefix(settings, profile, &tag) {
+        Ok(report) => report,
+        Err(err) => {
+            let _ = write_log(&log, &format!("=== prefix setup failed ===\n{err}\n"));
+            runlog::remove_if_empty(&artifacts);
+            return Err(AppError::Prefix(err));
+        }
+    };
+
     let prepared = launch::prepare(
         target,
         profile,
@@ -275,7 +306,14 @@ fn supervise(
         },
     );
 
-    let header = header(request, target, profile, prepared.as_ref().ok(), started_at);
+    let header = header(
+        request,
+        target,
+        profile,
+        prepared.as_ref().ok(),
+        prefix.as_ref(),
+        started_at,
+    );
     write_log(&log, &header).map_err(AppError::RunLog)?;
 
     let spec = match prepared {
@@ -411,23 +449,73 @@ fn write_log(log: &Mutex<File>, text: &str) -> io::Result<()> {
     file.write_all(text.as_bytes())
 }
 
+/// Creates/updates the profile's prefix (wine), with setup processes tagged like the run.
+pub fn ensure_prefix(
+    settings: &Settings,
+    profile: &Profile,
+    tag: &Tag,
+) -> Result<Option<prefix::Report>, PrefixError> {
+    let tags = BTreeMap::from([tag.env()]);
+    prefix::ensure(
+        profile,
+        &EnsureContext {
+            home: &settings.dirs.home,
+            search_path: &settings.search_path,
+            lock_dir: &settings.dirs.runtime,
+            tags: &tags,
+        },
+        |prefix| process::prefix_in_use(&process::scan(), prefix),
+    )
+}
+
+/// `--- prefix ---` section for run logs: what setup did and what is linked.
+pub fn prefix_section(report: &prefix::Report) -> String {
+    let mut out = String::from("--- prefix ---\n");
+    if report.created {
+        out += "created\n";
+    }
+    for change in &report.changes {
+        out += &format!("{change}\n");
+    }
+    for (name, linked) in [("dxvk", &report.state.dxvk), ("vkd3d", &report.state.vkd3d)] {
+        let source = linked.as_ref().map_or("wine builtin".into(), |linked| {
+            linked.source.display().to_string()
+        });
+        out += &format!("{name}: {source}\n");
+    }
+    if !report.output.trim().is_empty() {
+        out += &format!("wineboot output:\n{}\n", report.output.trim_end());
+    }
+    out
+}
+
+fn title(request: Request) -> String {
+    match request {
+        Request::Game { name } => format!("run {name}"),
+        Request::Execute { program, .. } => format!("execute {}", program.display()),
+        Request::Tricks { verbs: [], .. } => "tricks (GUI)".into(),
+        Request::Tricks { verbs, .. } => format!("tricks {}", verbs.join(" ")),
+    }
+}
+
+fn first_line(title: &str, started_at: DateTime<Local>) -> String {
+    format!(
+        "=== lootrs {} — {title} — {} ===\n",
+        env!("CARGO_PKG_VERSION"),
+        started_at.to_rfc3339_opts(chrono::SecondsFormat::Secs, false),
+    )
+}
+
 /// Run-log header: what was launched, how, and on what system.
 pub fn header(
     request: Request,
     target: Target,
     profile: &Profile,
     spec: Option<&LaunchSpec>,
+    prefix: Option<&prefix::Report>,
     started_at: DateTime<Local>,
 ) -> String {
-    let mut out = format!(
-        "=== lootrs {} — {} — {} ===\n",
-        env!("CARGO_PKG_VERSION"),
-        match request {
-            Request::Game { name } => format!("run {name}"),
-            Request::Execute { program, .. } => format!("execute {}", program.display()),
-        },
-        started_at.to_rfc3339_opts(chrono::SecondsFormat::Secs, false),
-    );
+    let mut out = first_line(&title(request), started_at);
 
     if let Target::Game(game) = target {
         out += &format!(
@@ -451,6 +539,10 @@ pub fn header(
             let version = diag::runner_version(runner).unwrap_or_else(|| "unknown".into());
             out += &format!("runner: {version} ({})\n", runner.display());
         }
+    }
+
+    if let Some(report) = prefix {
+        out += &prefix_section(report);
     }
 
     let system = SystemInfo::collect();
@@ -491,4 +583,77 @@ pub fn exit_code(status: ExitStatus) -> u8 {
         (None, Some(signal)) => u8::try_from(128 + signal).unwrap_or(255),
         (None, None) => 1,
     }
+}
+
+/// `lootrs init`: creates or updates a profile's prefix, logged under `init/<profile>/`.
+pub fn init(settings: &Settings, name: &str, out: &mut impl Write) -> Result<(), AppError> {
+    let catalog = Catalog::load(&settings.dirs.config);
+    let profile = catalog
+        .profile(name)
+        .ok_or_else(|| AppError::UnknownProfile(name.to_owned()))?;
+    check_issues(&profile.validate(&validation_context(settings)))?;
+    match profile.runner {
+        Runner::Native => {
+            return Err(AppError::Invalid(format!(
+                "profile `{name}` uses runner `native`, which has no prefix"
+            )));
+        }
+        Runner::Umu => {
+            return Err(AppError::NotImplemented {
+                command: "init for umu profiles",
+                milestone: "M5",
+            });
+        }
+        Runner::Wine => {}
+    }
+
+    let started_at = Local::now();
+    let stamp = started_at.format("%Y%m%d-%H%M%S").to_string();
+    let RunLog {
+        mut file,
+        artifacts,
+        ..
+    } = runlog::create(
+        &settings.logging.dir,
+        RunKind::Init(name),
+        &stamp,
+        settings.logging.keep,
+    )
+    .map_err(AppError::RunLog)?;
+    runlog::remove_if_empty(&artifacts);
+
+    let mut log = first_line(&format!("init {name}"), started_at);
+    log += &format!(
+        "--- profile ---\n{}",
+        toml::to_string(profile).unwrap_or_default()
+    );
+    let result = ensure_prefix(
+        settings,
+        profile,
+        &Tag::Session(format!("init:{name}:{stamp}")),
+    );
+    match &result {
+        Ok(Some(report)) => log += &prefix_section(report),
+        Ok(None) => {}
+        Err(err) => log += &format!("=== prefix setup failed ===\n{err}\n"),
+    }
+    file.write_all(log.as_bytes()).map_err(AppError::RunLog)?;
+
+    let report = result.map_err(AppError::Prefix)?.unwrap_or_default();
+    let prefix_path = profile
+        .prefix
+        .as_deref()
+        .map(|p| liblootrs::paths::expand_tilde(p, &settings.dirs.home))
+        .unwrap_or_default();
+    let summary = match (report.created, report.changes.is_empty()) {
+        (true, _) => "created",
+        (false, false) => "updated",
+        (false, true) => "up to date",
+    };
+    writeln!(out, "prefix {}: {summary}", prefix_path.display())?;
+    for change in &report.changes {
+        writeln!(out, "  {change}")?;
+    }
+    tracing::info!(profile = name, summary, "init");
+    Ok(())
 }

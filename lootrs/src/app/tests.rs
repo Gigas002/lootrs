@@ -13,17 +13,23 @@ fn settings(action: Action) -> Settings {
 }
 
 #[test]
-fn unimplemented_commands_fail_with_runtime_code() {
-    let err = run(&settings(Action::Init {
-        profile: "p".into(),
-    }))
-    .unwrap_err();
+fn json_status_is_not_implemented_yet() {
+    let err = run(&settings(Action::Status { json: true })).unwrap_err();
 
     assert_eq!(err.exit_code(), 1);
     assert_eq!(
         err.to_string(),
-        "`init` is not implemented yet (planned for M4)"
+        "`--json` is not implemented yet (planned for M7)"
     );
+}
+
+#[test]
+fn busy_prefix_exit_code() {
+    let busy = AppError::Prefix(PrefixError::Busy {
+        prefix: "/p".into(),
+    });
+
+    assert_eq!(busy.exit_code(), 4);
 }
 
 #[test]

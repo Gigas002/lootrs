@@ -9,7 +9,7 @@ use crate::{
 
 mod native;
 #[cfg(feature = "wine")]
-mod wine;
+pub mod wine;
 
 /// What a runner contributes to a launch.
 #[derive(Debug, Default)]

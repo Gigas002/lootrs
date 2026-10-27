@@ -49,18 +49,18 @@ fn version_flag() {
 #[test]
 fn command_logs_to_stderr_and_xdg_state_dir() {
     let home = tempfile::tempdir().unwrap();
-    let output = lootrs(home.path(), &["init", "-p", "x"]);
+    let output = lootrs(home.path(), &["init", "-p", "nope"]);
 
-    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.status.code(), Some(2));
     let stderr = String::from_utf8(output.stderr).unwrap();
-    assert!(stderr.contains("`init` is not implemented yet"), "{stderr}");
+    assert!(stderr.contains("no profile named `nope`"), "{stderr}");
 
     let log_dir = home.path().join(".local/state/lootrs/logs");
     let logs: String = std::fs::read_dir(&log_dir)
         .unwrap()
         .map(|entry| std::fs::read_to_string(entry.unwrap().path()).unwrap())
         .collect();
-    assert!(logs.contains("`init` is not implemented yet"));
+    assert!(logs.contains("no profile named `nope`"));
 }
 
 #[test]
@@ -380,4 +380,128 @@ fn run_status_stop_cycle() {
         assert!(Instant::now() < deadline, "{}", read_latest(&logs));
         std::thread::sleep(Duration::from_millis(50));
     }
+}
+
+#[cfg(feature = "wine")]
+/// Runs lootrs with `<home>/bin` first in `PATH`.
+fn lootrs_with_path(home: &Path, args: &[&str]) -> Output {
+    let path = format!("{}:/usr/bin:/bin", home.join("bin").display());
+    Command::new(env!("CARGO_BIN_EXE_lootrs"))
+        .args(args)
+        .env("HOME", home)
+        .env("PATH", path)
+        .env_remove("XDG_CONFIG_HOME")
+        .env_remove("XDG_STATE_HOME")
+        .env_remove("XDG_DATA_HOME")
+        .env_remove("XDG_RUNTIME_DIR")
+        .output()
+        .unwrap()
+}
+
+#[cfg(feature = "wine")]
+fn script(path: &Path, body: &str) {
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, format!("#!/bin/sh\n{body}")).unwrap();
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+#[cfg(feature = "wine")]
+/// A wine profile using fake `wine` (creates the prefix) and `winetricks` (echoes its env).
+fn fake_wine_profile(home: &Path, extra: &str) {
+    script(
+        &home.join("bin/wine"),
+        "mkdir -p \"$WINEPREFIX/drive_c/windows/system32\"\n\
+         echo builtin > \"$WINEPREFIX/drive_c/windows/system32/d3d11.dll\"\n\
+         touch \"$WINEPREFIX/system.reg\"\n\
+         echo \"wineboot $LOOTRS_SESSION\"\n",
+    );
+    script(
+        &home.join("bin/winetricks"),
+        "echo \"tricks $* wine=$WINE prefix=$WINEPREFIX\"\n",
+    );
+    let dll = home.join("dxvk/x64/d3d11.dll");
+    std::fs::create_dir_all(dll.parent().unwrap()).unwrap();
+    std::fs::write(dll, "dxvk").unwrap();
+
+    let profiles = home.join(".config/lootrs/profiles");
+    std::fs::create_dir_all(&profiles).unwrap();
+    std::fs::write(
+        profiles.join("w.toml"),
+        format!("name = \"w\"\nrunner = \"wine\"\nprefix = \"~/pfx\"\n{extra}"),
+    )
+    .unwrap();
+}
+
+#[cfg(feature = "wine")]
+#[test]
+fn init_creates_prefix_and_links_dxvk() {
+    let home = tempfile::tempdir().unwrap();
+    fake_wine_profile(home.path(), "dxvk = \"~/dxvk\"\n");
+
+    let output = lootrs_with_path(home.path(), &["init", "-p", "w"]);
+
+    assert!(output.status.success(), "{output:?}");
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains(": created\n"), "{stdout}");
+    assert!(stdout.contains("linked DXVK from"), "{stdout}");
+
+    let dll = home.path().join("pfx/drive_c/windows/system32/d3d11.dll");
+    assert_eq!(std::fs::read_to_string(&dll).unwrap(), "dxvk");
+    assert!(dll.is_symlink());
+
+    let log_dir = home.path().join(".local/state/lootrs/logs/init/w");
+    let log = read_latest(&log_dir);
+    assert!(log.contains("wineboot init:w:"), "{log}");
+    assert!(log.contains("dxvk: "), "{log}");
+
+    let again = lootrs_with_path(home.path(), &["init", "-p", "w"]);
+    assert!(
+        String::from_utf8(again.stdout)
+            .unwrap()
+            .ends_with(": up to date\n")
+    );
+}
+
+#[cfg(feature = "wine")]
+#[test]
+fn tricks_runs_winetricks_in_foreground() {
+    let home = tempfile::tempdir().unwrap();
+    fake_wine_profile(home.path(), "");
+
+    let output = lootrs_with_path(home.path(), &["tricks", "-p", "w", "--", "corefonts"]);
+
+    assert!(output.status.success(), "{output:?}");
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        stdout.contains(&format!(
+            "tricks corefonts wine={} prefix={}",
+            home.path().join("bin/wine").display(),
+            home.path().join("pfx").display()
+        )),
+        "{stdout}"
+    );
+    // The prefix was created before winetricks ran.
+    assert!(home.path().join("pfx/system.reg").is_file());
+}
+
+#[test]
+fn init_and_tricks_reject_native_profiles() {
+    let home = tempfile::tempdir().unwrap();
+    fake_game(home.path());
+
+    let init = lootrs(home.path(), &["init", "-p", "native"]);
+    let tricks = lootrs(home.path(), &["tricks", "-p", "native"]);
+
+    assert_eq!(init.status.code(), Some(2));
+    assert!(
+        String::from_utf8(init.stderr)
+            .unwrap()
+            .contains("has no prefix")
+    );
+    assert_eq!(tricks.status.code(), Some(2));
+    assert!(
+        String::from_utf8(tricks.stderr)
+            .unwrap()
+            .contains("needs a wine or umu profile")
+    );
 }

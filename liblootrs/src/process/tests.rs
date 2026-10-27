@@ -214,3 +214,14 @@ fn terminate_nothing() {
 
     assert_eq!(outcome, Outcome::default());
 }
+
+#[test]
+fn prefix_in_use_ignores_infrastructure() {
+    let processes = [
+        process(1, "wineserver", game("a"), Some("/p")),
+        process(2, "Game.exe", game("b"), Some("/q")),
+    ];
+
+    assert!(!prefix_in_use(&processes, Path::new("/p")));
+    assert!(prefix_in_use(&processes, Path::new("/q")));
+}

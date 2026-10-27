@@ -7,6 +7,7 @@ pub mod diag;
 pub mod launch;
 pub mod model;
 pub mod paths;
+pub mod prefix;
 pub mod process;
 pub mod runlog;
 mod runner;

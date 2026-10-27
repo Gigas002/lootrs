@@ -247,3 +247,18 @@ fn wine_without_feature_is_a_problem() {
 
     assert!(err.problems[0].contains("built without the `wine` feature"));
 }
+
+#[test]
+fn tricks_need_a_prefix_runner() {
+    let fx = Fixture::new();
+
+    let err = prepare(
+        Target::Tricks { verbs: &[] },
+        &Profile::new("p", Runner::Native),
+        &Tag::Session("tricks:p:1".into()),
+        &fx.ctx(&[]),
+    )
+    .unwrap_err();
+
+    assert_eq!(err.problems, ["`tricks` needs a wine or umu profile"]);
+}

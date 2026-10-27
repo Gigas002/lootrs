@@ -37,6 +37,10 @@ pub enum Target<'a> {
     Execute {
         program: &'a Path,
     },
+    /// `winetricks` in the profile's prefix; no verbs opens its GUI.
+    Tricks {
+        verbs: &'a [String],
+    },
 }
 
 /// How the processes are tagged, see [`TAG_GAME`] and [`TAG_SESSION`].
@@ -44,6 +48,16 @@ pub enum Target<'a> {
 pub enum Tag {
     Game(String),
     Session(String),
+}
+
+impl Tag {
+    /// The environment variable carrying this tag.
+    pub fn env(&self) -> (String, OsString) {
+        match self {
+            Self::Game(name) => (TAG_GAME.into(), name.into()),
+            Self::Session(session) => (TAG_SESSION.into(), session.into()),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -125,6 +139,20 @@ pub fn prepare(
             };
             (exe, cwd)
         }
+        Target::Tricks { .. } => {
+            let winetricks = Path::new("winetricks");
+            let exe = match profile.runner {
+                Runner::Native => {
+                    problems.push("`tricks` needs a wine or umu profile".into());
+                    winetricks.to_path_buf()
+                }
+                _ => find_program(winetricks, ctx.search_path).unwrap_or_else(|| {
+                    problems.push("`winetricks` not found in PATH".into());
+                    winetricks.to_path_buf()
+                }),
+            };
+            (exe, home.to_path_buf())
+        }
     };
     if !cwd.is_dir() {
         problems.push(format!("working directory not found: {}", cwd.display()));
@@ -145,7 +173,12 @@ pub fn prepare(
         }
     };
 
-    let wrappers = resolve_wrappers(&profile.wrappers, ctx.search_path, &mut problems);
+    let tricks = matches!(target, Target::Tricks { .. });
+    let wrappers = if tricks {
+        Vec::new()
+    } else {
+        resolve_wrappers(&profile.wrappers, ctx.search_path, &mut problems)
+    };
 
     let Some(RunnerCommand {
         program: runner_program,
@@ -160,15 +193,25 @@ pub fn prepare(
     }
 
     // [runner args...] exe [game args...] [extra args...]
+    // winetricks runs wine itself, found through `WINE`.
     let mut argv: Vec<OsString> = Vec::new();
     let runner_bin = runner_program.clone();
-    if let Some(program) = runner_program {
-        argv.push(program.into_os_string());
-        argv.extend(runner_args);
+    let mut runner_env = runner_env;
+    match (runner_program, tricks) {
+        (Some(program), true) => {
+            runner_env.insert("WINE".into(), program.into_os_string());
+        }
+        (Some(program), false) => {
+            argv.push(program.into_os_string());
+            argv.extend(runner_args);
+        }
+        (None, _) => {}
     }
     argv.push(exe.into_os_string());
-    if let Target::Game(game) = target {
-        argv.extend(game.args.iter().map(OsString::from));
+    match target {
+        Target::Game(game) => argv.extend(game.args.iter().map(OsString::from)),
+        Target::Tricks { verbs } => argv.extend(verbs.iter().map(OsString::from)),
+        Target::Execute { .. } => {}
     }
     argv.extend(ctx.extra_args.iter().map(OsString::from));
 
@@ -180,13 +223,11 @@ pub fn prepare(
 
     let game_env = match target {
         Target::Game(game) => Some(&game.env),
-        Target::Execute { .. } => None,
+        Target::Execute { .. } | Target::Tricks { .. } => None,
     };
     let mut env = merge_env(runner_env, &profile.env, game_env);
-    match tag {
-        Tag::Game(name) => env.insert(TAG_GAME.into(), name.into()),
-        Tag::Session(session) => env.insert(TAG_SESSION.into(), session.into()),
-    };
+    let (key, value) = tag.env();
+    env.insert(key, value);
     if let Some(prefix) = prefix {
         env.insert(TAG_PREFIX.into(), prefix.into_os_string());
     }

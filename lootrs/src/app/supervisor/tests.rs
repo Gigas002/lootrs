@@ -128,6 +128,7 @@ fn header_sections() {
         Target::Game(&game),
         &profile,
         Some(&spec),
+        None,
         Local::now(),
     );
 

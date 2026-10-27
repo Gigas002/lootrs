@@ -184,6 +184,15 @@ pub fn is_running(processes: &[Process], owner: &Owner) -> bool {
         .any(|p| p.tags.owner.as_ref() == Some(owner) && !p.is_wine_infrastructure())
 }
 
+/// Whether a game or session is active in `prefix` (lingering infrastructure doesn't count).
+pub fn prefix_in_use(processes: &[Process], prefix: &Path) -> bool {
+    processes.iter().any(|p| {
+        p.tags.owner.is_some()
+            && p.tags.prefix.as_deref() == Some(prefix)
+            && !p.is_wine_infrastructure()
+    })
+}
+
 /// PIDs to signal when stopping `owner`.
 ///
 /// Its own processes, except wine infrastructure while another owner is still

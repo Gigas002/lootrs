@@ -195,3 +195,70 @@ fn dll_overrides_and_builtin_programs() {
     assert_eq!(spec.args, ["winecfg"]);
     assert_eq!(spec.cwd, fx.dir.path());
 }
+
+#[test]
+fn dxvk_and_vkd3d_dlls_get_overrides_profile_wins() {
+    let fx = Fixture::new();
+    for dll in [
+        "dxvk/x64/d3d11.dll",
+        "dxvk/x64/dxgi.dll",
+        "vkd3d/x64/d3d12.dll",
+    ] {
+        let path = fx.dir.path().join(dll);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, "").unwrap();
+    }
+    let profile = Profile {
+        dxvk: Some("~/dxvk".into()),
+        vkd3d: Some("~/vkd3d".into()),
+        dll_overrides: BTreeMap::from([("dxgi".into(), "b".into())]),
+        ..fx.profile()
+    };
+
+    let spec = fx.prepare(&profile, false).unwrap();
+
+    assert_eq!(spec.env[DLL_OVERRIDES_VAR], "d3d11=n,b;d3d12=n,b;dxgi=b");
+}
+
+#[test]
+fn tricks_runs_winetricks_with_wine_env() {
+    let fx = Fixture::new();
+    executable(&fx.dir.path().join("bin/winetricks"));
+    executable(&fx.dir.path().join("bin/mangohud"));
+    let profile = Profile {
+        wrappers: vec!["mangohud".into()],
+        runner_args: vec!["--ignored".into()],
+        ..fx.profile()
+    };
+    let verbs = ["vcrun2022".to_owned()];
+
+    let spec = prepare(
+        Target::Tricks { verbs: &verbs },
+        &profile,
+        &Tag::Session("tricks:p:1".into()),
+        &fx.ctx(false),
+    )
+    .unwrap();
+
+    assert_eq!(spec.program, fx.dir.path().join("bin/winetricks"));
+    assert_eq!(spec.args, ["vcrun2022"]);
+    assert_eq!(spec.env["WINE"], fx.dir.path().join("bin/wine").as_os_str());
+    assert_eq!(
+        spec.env["WINEPREFIX"],
+        fx.dir.path().join("pfx").as_os_str()
+    );
+    assert_eq!(spec.cwd, fx.dir.path());
+}
+
+#[test]
+fn wineserver_next_to_wine_or_in_path() {
+    let fx = Fixture::new();
+    let wine = fx.dir.path().join("bin/wine");
+
+    assert_eq!(resolve_wineserver(&wine, &[]), None);
+    executable(&fx.dir.path().join("bin/wineserver"));
+    assert_eq!(
+        resolve_wineserver(&wine, &[]),
+        Some(fx.dir.path().join("bin/wineserver"))
+    );
+}

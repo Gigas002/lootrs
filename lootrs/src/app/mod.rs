@@ -5,9 +5,11 @@ use std::{
     path::PathBuf,
 };
 
-use liblootrs::{launch::LaunchError, model::ValidationContext, process, store::Catalog};
+use liblootrs::{
+    launch::LaunchError, model::ValidationContext, prefix::PrefixError, process, store::Catalog,
+};
 
-use crate::settings::{Action, Settings};
+use crate::settings::{Action, LaunchMode, Settings};
 
 pub mod commands;
 pub mod supervisor;
@@ -63,6 +65,9 @@ pub enum AppError {
     #[error("cancelled")]
     Cancelled,
 
+    #[error(transparent)]
+    Prefix(PrefixError),
+
     #[error("failed to write output: {0}")]
     Output(#[from] io::Error),
 }
@@ -84,6 +89,8 @@ impl AppError {
             | Self::CheckFailed(_)
             | Self::Invalid(_)
             | Self::Preflight(_) => 2,
+            Self::Prefix(PrefixError::Busy { .. }) => 4,
+            Self::Prefix(_) => 1,
             Self::NotRunning(_) => 3,
             Self::AlreadyRunning(_) => 4,
             Self::Supervisor { code, .. } => *code,
@@ -163,7 +170,16 @@ pub fn run(settings: &Settings) -> Result<u8, AppError> {
                 )
             },
         )),
-        Action::Init { .. } | Action::Tricks { .. } => not_implemented(action.name(), "M4"),
+        Action::Init { profile } => done(supervisor::init(settings, profile, &mut out)),
+        // Interactive, so always in the foreground.
+        Action::Tricks { profile, verbs } => supervisor::launch(
+            settings,
+            supervisor::Request::Tricks { profile, verbs },
+            LaunchMode::Wait,
+            false,
+            &[],
+            &mut out,
+        ),
         Action::Tui => not_implemented(action.name(), "M6"),
     }?;
     out.flush()?;
