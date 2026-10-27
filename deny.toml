@@ -2,7 +2,7 @@
 all-features = true
 
 [licenses]
-allow = ["MIT"]
+allow = ["GPL-3.0-or-later", "MIT"]
 confidence-threshold = 0.8
 private = { ignore = true }
 
