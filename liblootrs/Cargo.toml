@@ -1,0 +1,19 @@
+[package]
+name = "liblootrs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+description.workspace = true
+keywords.workspace = true
+repository.workspace = true
+
+[features]
+default = ["wine", "umu"]
+# Wine runner, DXVK/VKD3D prefix management, winetricks (lands in M2/M4).
+wine = []
+# Proton runner via umu-launcher (lands in M5).
+umu = []
+
+[dependencies]
+thiserror.workspace = true
