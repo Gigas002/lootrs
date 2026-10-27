@@ -1,5 +1,3 @@
-use std::os::unix::fs::PermissionsExt;
-
 use super::*;
 
 /// A temp dir with a fake prefix (wine's DLLs present), a DXVK and a VKD3D release.
@@ -201,8 +199,23 @@ fn dll_names_for_overrides() {
 }
 
 fn fake_wine(fx: &Fixture, script: &str) {
-    fx.write("bin/wine", script);
-    std::fs::set_permissions(fx.path("bin/wine"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    write_script(&fx.path("bin/wine"), script);
+}
+
+/// Writes an executable script from a child process: a fork in this
+/// multi-threaded test binary that inherited a write handle to it would make
+/// running it fail with "Text file busy".
+fn write_script(path: &Path, content: &str) {
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let source = path.with_extension("src");
+    std::fs::write(&source, content).unwrap();
+    let status = std::process::Command::new("install")
+        .args(["-m", "755"])
+        .arg(&source)
+        .arg(path)
+        .status()
+        .unwrap();
+    assert!(status.success());
 }
 
 #[test]
@@ -238,5 +251,63 @@ fn failed_wineboot_is_reported() {
 
     let err = fx.ensure(None, None, false).unwrap_err();
 
-    assert!(matches!(&err, PrefixError::Create { output, .. } if output.contains("no display")));
+    assert!(
+        matches!(&err, PrefixError::Create { output, .. } if output.contains("no display")),
+        "{err:?}"
+    );
+}
+
+fn ensure_umu_with(fx: &Fixture, script: &str) -> Result<Report, PrefixError> {
+    write_script(&fx.path("bin/umu-run"), script);
+    let env = BTreeMap::from([("WINEPREFIX".to_owned(), fx.path("pfx").into())]);
+    ensure_umu(&UmuSetup {
+        prefix: &fx.path("pfx"),
+        umu_run: &fx.path("bin/umu-run"),
+        env: &env,
+        lock_dir: &fx.path("locks"),
+    })
+}
+
+#[test]
+fn umu_prefix_is_created_despite_proton_exit_code() {
+    let fx = Fixture::new();
+    std::fs::remove_dir_all(fx.path("pfx")).unwrap();
+
+    // Proton fails to start the empty executable but has created the prefix.
+    let report = ensure_umu_with(
+        &fx,
+        "#!/bin/sh\n[ \"$1\" = createprefix ] || exit 9\ntouch \"$WINEPREFIX/system.reg\"\necho 'File not found.'\nexit 1\n",
+    )
+    .unwrap();
+
+    assert!(report.created);
+    assert_eq!(report.output.trim(), "File not found.");
+    assert!(report.changes.is_empty());
+    assert!(!fx.path("pfx").join(STATE_FILE).exists());
+}
+
+#[test]
+fn existing_umu_prefix_is_left_alone() {
+    let fx = Fixture::new();
+
+    let report = ensure_umu_with(&fx, "#!/bin/sh\nexit 9\n").unwrap();
+
+    assert!(!report.created);
+    assert!(report.output.is_empty());
+}
+
+#[test]
+fn failed_createprefix_is_reported() {
+    let fx = Fixture::new();
+    std::fs::remove_dir_all(fx.path("pfx")).unwrap();
+
+    let err = ensure_umu_with(&fx, "#!/bin/sh\necho 'no runtime' >&2\nexit 1\n").unwrap_err();
+
+    assert!(
+        matches!(
+            &err,
+            PrefixError::Create { command: "umu-run createprefix", output, .. } if output.contains("no runtime")
+        ),
+        "{err:?}"
+    );
 }

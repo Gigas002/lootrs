@@ -50,6 +50,9 @@ impl Fixture {
             debug,
             extra_args: &[],
             artifacts_dir: &self.artifacts,
+            battleye_runtime: None,
+            eac_runtime: None,
+            umu_runtime_update: false,
         }
     }
 

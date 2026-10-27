@@ -6,11 +6,17 @@ prefix = "~/.local/share/lootrs/prefixes/proton"
 # wrappers = ["mangohud"]
 
 [umu]
-# Required: an installed Proton build. lootrs never lets umu download one.
+# Required: an installed Proton build (a directory with the `proton` script).
+# lootrs never lets umu download one. Distro packages work too, e.g.
+# "/usr/share/steam/compatibilitytools.d/proton-cachyos-native".
 proton = "~/.local/share/Steam/compatibilitytools.d/GE-Proton10-20"
 # umu_run = "/usr/bin/umu-run"                  # default: `umu-run` from PATH
 # game_id = "umu-default"                       # default GAMEID; games can override
 # store = ""                                    # STORE for protonfixes
+
+# `debug = true` (or `--debug`) writes Proton's log into the run's log directory.
+# umu's own debug output dumps your whole environment; opt in explicitly with
+# env = { UMU_LOG = "debug" }
 
 # [anticheat]
 # battleye = false

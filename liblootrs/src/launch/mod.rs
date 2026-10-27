@@ -37,7 +37,8 @@ pub enum Target<'a> {
     Execute {
         program: &'a Path,
     },
-    /// `winetricks` in the profile's prefix; no verbs opens its GUI.
+    /// `winetricks` in the profile's prefix. With wine, no verbs opens its GUI;
+    /// umu runs the winetricks bundled with Proton and needs verbs.
     Tricks {
         verbs: &'a [String],
     },
@@ -71,6 +72,11 @@ pub struct LaunchContext<'a> {
     pub extra_args: &'a [String],
     /// Per-run directory for runner-side logs (DXVK, VKD3D, Proton).
     pub artifacts_dir: &'a Path,
+    /// Anti-cheat runtime directories from `config.toml`.
+    pub battleye_runtime: Option<&'a Path>,
+    pub eac_runtime: Option<&'a Path>,
+    /// Let umu update its Steam Runtime; otherwise `UMU_RUNTIME_UPDATE=0`.
+    pub umu_runtime_update: bool,
 }
 
 /// A fully resolved command.
@@ -139,14 +145,23 @@ pub fn prepare(
             };
             (exe, cwd)
         }
-        Target::Tricks { .. } => {
+        Target::Tricks { verbs } => {
             let winetricks = Path::new("winetricks");
             let exe = match profile.runner {
                 Runner::Native => {
                     problems.push("`tricks` needs a wine or umu profile".into());
                     winetricks.to_path_buf()
                 }
-                _ => find_program(winetricks, ctx.search_path).unwrap_or_else(|| {
+                // `umu-run winetricks` is umu's own command, not a path.
+                Runner::Umu => {
+                    if verbs.is_empty() {
+                        problems.push(
+                            "umu runs winetricks without its GUI; name the verbs to install".into(),
+                        );
+                    }
+                    winetricks.to_path_buf()
+                }
+                Runner::Wine => find_program(winetricks, ctx.search_path).unwrap_or_else(|| {
                     problems.push("`winetricks` not found in PATH".into());
                     winetricks.to_path_buf()
                 }),
@@ -165,7 +180,11 @@ pub fn prepare(
         .filter(|_| profile.runner != Runner::Native)
         .map(|prefix| paths::expand_tilde(prefix, home));
 
-    let command = match runner::command(profile, prefix.as_deref(), debug, ctx) {
+    let game_id = match target {
+        Target::Game(game) => game.game_id.as_deref(),
+        Target::Execute { .. } | Target::Tricks { .. } => None,
+    };
+    let command = match runner::command(profile, prefix.as_deref(), game_id, debug, ctx) {
         Ok(command) => Some(command),
         Err(mut runner_problems) => {
             problems.append(&mut runner_problems);
@@ -193,14 +212,16 @@ pub fn prepare(
     }
 
     // [runner args...] exe [game args...] [extra args...]
-    // winetricks runs wine itself, found through `WINE`.
+    // With wine, winetricks runs wine itself, found through `WINE`; umu runs
+    // `umu-run winetricks`. Runner args don't apply to either.
     let mut argv: Vec<OsString> = Vec::new();
     let runner_bin = runner_program.clone();
     let mut runner_env = runner_env;
     match (runner_program, tricks) {
-        (Some(program), true) => {
+        (Some(program), true) if profile.runner == Runner::Wine => {
             runner_env.insert("WINE".into(), program.into_os_string());
         }
+        (Some(program), true) => argv.push(program.into_os_string()),
         (Some(program), false) => {
             argv.push(program.into_os_string());
             argv.extend(runner_args);

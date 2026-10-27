@@ -1,4 +1,7 @@
-//! Wine prefix setup: creation, and DXVK/VKD3D-Proton linking.
+//! Prefix setup: creation, and DXVK/VKD3D-Proton linking for wine.
+//!
+//! umu prefixes are only created (`umu-run createprefix`); Proton manages
+//! everything inside them.
 //!
 //! lootrs records what it linked in `<prefix>/.lootrs.toml`. [`ensure_wine`]
 //! compares that with the profile on every launch and fixes any difference:
@@ -21,7 +24,7 @@ use std::{
 use serde::{Deserialize, Serialize};
 
 use crate::model::{Profile, Runner};
-#[cfg(feature = "wine")]
+#[cfg(any(feature = "wine", feature = "umu"))]
 use crate::paths;
 
 #[cfg(test)]
@@ -85,13 +88,24 @@ pub struct WineSetup<'a> {
     pub lock_dir: &'a Path,
 }
 
-/// What [`ensure_wine`] did.
+/// Everything [`ensure_umu`] needs; paths are absolute.
+#[derive(Debug, Clone)]
+pub struct UmuSetup<'a> {
+    pub prefix: &'a Path,
+    pub umu_run: &'a Path,
+    /// Env for `umu-run createprefix` (`PROTONPATH` and friends, plus lootrs tags).
+    pub env: &'a BTreeMap<String, OsString>,
+    /// Directory for per-prefix lock files.
+    pub lock_dir: &'a Path,
+}
+
+/// What [`ensure_wine`] or [`ensure_umu`] did.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Report {
     pub created: bool,
     /// One line per change, e.g. "linked DXVK from /opt/dxvk (5 DLLs)".
     pub changes: Vec<String>,
-    /// Output of `wineboot` when the prefix was created.
+    /// Output of `wineboot`/`createprefix` when the prefix was created.
     pub output: String,
     /// The state after setup.
     pub state: PrefixState,
@@ -102,8 +116,12 @@ pub enum PrefixError {
     #[error("{context}: {source}")]
     Io { context: String, source: io::Error },
 
-    #[error("creating the prefix failed (wineboot {status}):\n{output}")]
-    Create { status: String, output: String },
+    #[error("creating the prefix failed ({command}: {status}):\n{output}")]
+    Create {
+        command: &'static str,
+        status: String,
+        output: String,
+    },
 
     #[error("{} directory {} has no x64/*.dll", component.name(), dir.display())]
     NoDlls { component: Component, dir: PathBuf },
@@ -123,28 +141,36 @@ pub struct EnsureContext<'a> {
     pub lock_dir: &'a Path,
     /// lootrs tags for the processes started during setup.
     pub tags: &'a BTreeMap<String, OsString>,
+    /// See [`crate::launch::LaunchContext::umu_runtime_update`].
+    pub umu_runtime_update: bool,
 }
 
-/// Sets up the profile's prefix. `Ok(None)` for runners lootrs doesn't
-/// prepare: native has no prefix, and umu creates its own on launch.
+/// Sets up the profile's prefix. `Ok(None)` for native, which has no prefix.
 pub fn ensure(
     profile: &Profile,
     ctx: &EnsureContext,
     in_use: impl Fn(&Path) -> bool,
 ) -> Result<Option<Report>, PrefixError> {
+    #[cfg(any(feature = "wine", feature = "umu"))]
+    let prefix = || {
+        profile
+            .prefix
+            .as_deref()
+            .map(|prefix| paths::expand_tilde(prefix, ctx.home))
+            .ok_or_else(|| {
+                PrefixError::Runner(format!(
+                    "`prefix` is required for runner `{}`",
+                    profile.runner
+                ))
+            })
+    };
     match profile.runner {
-        Runner::Native | Runner::Umu => Ok(None),
+        Runner::Native => Ok(None),
         #[cfg(feature = "wine")]
         Runner::Wine => {
             use crate::runner::wine;
 
-            let prefix = profile
-                .prefix
-                .as_deref()
-                .map(|prefix| paths::expand_tilde(prefix, ctx.home))
-                .ok_or_else(|| {
-                    PrefixError::Runner("`prefix` is required for runner `wine`".into())
-                })?;
+            let prefix = prefix()?;
             let wine = wine::resolve_wine(profile, ctx.home, ctx.search_path)
                 .map_err(PrefixError::Runner)?;
             let wineserver = wine::resolve_wineserver(&wine, ctx.search_path);
@@ -168,15 +194,66 @@ pub fn ensure(
             )
             .map(Some)
         }
-        #[cfg(not(feature = "wine"))]
-        Runner::Wine => {
-            let _ = (ctx, in_use);
-            Err(PrefixError::Runner(
-                "runner `wine` is not available: lootrs was built without the `wine` feature"
-                    .into(),
-            ))
+        #[cfg(feature = "umu")]
+        Runner::Umu => {
+            use crate::runner::umu;
+
+            let prefix = prefix()?;
+            let umu_run = umu::resolve_umu_run(profile, ctx.home, ctx.search_path)
+                .map_err(PrefixError::Runner)?;
+            let proton = umu::resolve_proton(profile, ctx.home).map_err(PrefixError::Runner)?;
+            let mut env = umu::base_env(profile, &prefix, &proton, None, ctx.umu_runtime_update);
+            env.extend(ctx.tags.clone());
+            ensure_umu(&UmuSetup {
+                prefix: &prefix,
+                umu_run: &umu_run,
+                env: &env,
+                lock_dir: ctx.lock_dir,
+            })
+            .map(Some)
+        }
+        #[allow(unreachable_patterns)]
+        runner => {
+            let _ = (ctx, &in_use);
+            Err(PrefixError::Runner(format!(
+                "runner `{runner}` is not available: lootrs was built without the `{runner}` feature"
+            )))
         }
     }
+}
+
+/// Creates the prefix with `umu-run createprefix` if it doesn't exist yet.
+pub fn ensure_umu(setup: &UmuSetup) -> Result<Report, PrefixError> {
+    let prefix = setup.prefix;
+    let _lock = lock(setup.lock_dir, prefix)?;
+    let mut report = Report {
+        state: read_state(prefix),
+        ..Report::default()
+    };
+    if prefix.join("system.reg").is_file() {
+        return Ok(report);
+    }
+
+    std::fs::create_dir_all(prefix).map_err(io_err(format!("creating {}", prefix.display())))?;
+    let output = run(Command::new(setup.umu_run)
+        .arg("createprefix")
+        .envs(setup.env))
+    .map_err(io_err(format!(
+        "running {} createprefix",
+        setup.umu_run.display()
+    )))?;
+    // Proton exits non-zero here because there is no executable to start,
+    // even though the prefix was created; the prefix itself is what counts.
+    if !prefix.join("system.reg").is_file() {
+        return Err(PrefixError::Create {
+            command: "umu-run createprefix",
+            status: output.status.to_string(),
+            output: text(&output),
+        });
+    }
+    report.created = true;
+    report.output = text(&output);
+    Ok(report)
 }
 
 fn io_err(context: impl Into<String>) -> impl FnOnce(io::Error) -> PrefixError {
@@ -291,6 +368,7 @@ fn create(setup: &WineSetup) -> Result<String, PrefixError> {
         Ok(output)
     } else {
         Err(PrefixError::Create {
+            command: "wineboot",
             status: wineboot.status.to_string(),
             output,
         })

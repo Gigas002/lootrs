@@ -1,7 +1,6 @@
 //! End-to-end checks of the `lootrs` binary against an isolated HOME.
 
 use std::{
-    os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     process::{Command, Output},
     time::{Duration, Instant},
@@ -190,12 +189,10 @@ fn fake_game(home: &Path) -> PathBuf {
     std::fs::create_dir_all(home.join("game")).unwrap();
 
     let script = home.join("game/game.sh");
-    std::fs::write(
+    write_script(
         &script,
         "#!/bin/sh\necho \"args=$* tag=$LOOTRS_GAME var=$GAME_VAR cwd=$(pwd)\"\necho oops >&2\nexit 3\n",
-    )
-    .unwrap();
-    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    );
 
     std::fs::write(
         config.join("games.toml"),
@@ -326,8 +323,7 @@ fn long_game(home: &Path, name: &str) {
     std::fs::create_dir_all(config.join("profiles")).unwrap();
     std::fs::create_dir_all(home.join("game")).unwrap();
     let script = home.join("game/long.sh");
-    std::fs::write(&script, "#!/bin/sh\nsleep 60 &\nwait\n").unwrap();
-    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    write_script(&script, "#!/bin/sh\nsleep 60 &\nwait\n");
     std::fs::write(
         config.join("games.toml"),
         format!("[[game]]\nname = \"{name}\"\nexe = \"~/game/long.sh\"\nprofile = \"native\"\n"),
@@ -382,7 +378,7 @@ fn run_status_stop_cycle() {
     }
 }
 
-#[cfg(feature = "wine")]
+#[cfg(any(feature = "wine", feature = "umu"))]
 /// Runs lootrs with `<home>/bin` first in `PATH`.
 fn lootrs_with_path(home: &Path, args: &[&str]) -> Output {
     let path = format!("{}:/usr/bin:/bin", home.join("bin").display());
@@ -398,11 +394,25 @@ fn lootrs_with_path(home: &Path, args: &[&str]) -> Output {
         .unwrap()
 }
 
-#[cfg(feature = "wine")]
+#[cfg(any(feature = "wine", feature = "umu"))]
 fn script(path: &Path, body: &str) {
+    write_script(path, &format!("#!/bin/sh\n{body}"));
+}
+
+/// Writes an executable script from a child process: a fork in this
+/// multi-threaded test binary that inherited a write handle to it would make
+/// running it fail with "Text file busy".
+fn write_script(path: &Path, content: &str) {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    std::fs::write(path, format!("#!/bin/sh\n{body}")).unwrap();
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let source = path.with_extension("src");
+    std::fs::write(&source, content).unwrap();
+    let status = std::process::Command::new("install")
+        .args(["-m", "755"])
+        .arg(&source)
+        .arg(path)
+        .status()
+        .unwrap();
+    assert!(status.success());
 }
 
 #[cfg(feature = "wine")]
@@ -503,5 +513,103 @@ fn init_and_tricks_reject_native_profiles() {
         String::from_utf8(tricks.stderr)
             .unwrap()
             .contains("needs a wine or umu profile")
+    );
+}
+
+/// A umu profile with a fake `umu-run` (creates the prefix on `createprefix`,
+/// otherwise echoes its args and env) and a fake Proton build.
+#[cfg(feature = "umu")]
+fn fake_umu_profile(home: &Path) {
+    script(
+        &home.join("bin/umu-run"),
+        "if [ \"$1\" = createprefix ]; then\n\
+           mkdir -p \"$WINEPREFIX\" && touch \"$WINEPREFIX/system.reg\"\n\
+           echo 'File not found.'; exit 1\n\
+         fi\n\
+         echo \"umu $* proton=$PROTONPATH gameid=$GAMEID update=$UMU_RUNTIME_UPDATE\"\n",
+    );
+    let proton = home.join("proton");
+    std::fs::create_dir_all(&proton).unwrap();
+    std::fs::write(proton.join("proton"), "").unwrap();
+    std::fs::write(proton.join("version"), "1 test-proton-1\n").unwrap();
+
+    let profiles = home.join(".config/lootrs/profiles");
+    std::fs::create_dir_all(&profiles).unwrap();
+    std::fs::write(
+        profiles.join("u.toml"),
+        format!(
+            "name = \"u\"\nrunner = \"umu\"\nprefix = \"~/upfx\"\n[umu]\nproton = \"{}\"\ngame_id = \"umu-42\"\n",
+            proton.display()
+        ),
+    )
+    .unwrap();
+}
+
+#[cfg(feature = "umu")]
+#[test]
+fn umu_init_creates_prefix_with_createprefix() {
+    let home = tempfile::tempdir().unwrap();
+    fake_umu_profile(home.path());
+
+    let output = lootrs_with_path(home.path(), &["init", "-p", "u"]);
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .ends_with(": created\n")
+    );
+    assert!(home.path().join("upfx/system.reg").is_file());
+    let log = read_latest(&home.path().join(".local/state/lootrs/logs/init/u"));
+    assert!(
+        log.contains("createprefix output:\nFile not found."),
+        "{log}"
+    );
+    assert!(!log.contains("dxvk:"), "{log}");
+
+    let again = lootrs_with_path(home.path(), &["init", "-p", "u"]);
+    assert!(
+        String::from_utf8(again.stdout)
+            .unwrap()
+            .ends_with(": up to date\n")
+    );
+}
+
+#[cfg(feature = "umu")]
+#[test]
+fn umu_tricks_and_execute() {
+    let home = tempfile::tempdir().unwrap();
+    fake_umu_profile(home.path());
+    let proton = home.path().join("proton");
+
+    let tricks = lootrs_with_path(home.path(), &["tricks", "-p", "u", "--", "corefonts"]);
+    assert!(tricks.status.success(), "{tricks:?}");
+    assert_eq!(
+        String::from_utf8(tricks.stdout).unwrap(),
+        format!(
+            "umu winetricks corefonts proton={} gameid=umu-42 update=0\n",
+            proton.display()
+        )
+    );
+
+    let no_verbs = lootrs_with_path(home.path(), &["tricks", "-p", "u"]);
+    assert_eq!(no_verbs.status.code(), Some(2));
+    assert!(
+        String::from_utf8(no_verbs.stderr)
+            .unwrap()
+            .contains("name the verbs to install")
+    );
+
+    let execute = lootrs_with_path(home.path(), &["execute", "-p", "u", "--wait", "winecfg"]);
+    assert!(execute.status.success(), "{execute:?}");
+    assert!(
+        String::from_utf8(execute.stdout)
+            .unwrap()
+            .starts_with("umu winecfg ")
+    );
+    let log = read_latest(&home.path().join(".local/state/lootrs/logs/execute/u"));
+    assert!(
+        log.contains(&format!("proton: test-proton-1 ({})", proton.display())),
+        "{log}"
     );
 }

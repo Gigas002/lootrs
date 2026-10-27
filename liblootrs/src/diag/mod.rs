@@ -62,6 +62,14 @@ pub fn runner_version(program: &Path) -> Option<String> {
         .map(str::to_owned)
 }
 
+/// Name from a Proton build's `version` file (`<build time> <name>`).
+pub fn proton_version(proton: &Path) -> Option<String> {
+    let content = std::fs::read_to_string(proton.join("version")).ok()?;
+    let line = content.lines().next()?.trim();
+    let name = line.split_once(' ').map_or(line, |(_, name)| name);
+    (!name.is_empty()).then(|| name.to_owned())
+}
+
 /// Quotes one argument for a POSIX shell, leaving safe words bare.
 pub fn shell_quote(arg: &OsStr) -> String {
     let arg = arg.to_string_lossy();

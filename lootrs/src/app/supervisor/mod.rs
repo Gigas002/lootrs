@@ -303,6 +303,9 @@ fn supervise(
             debug,
             extra_args,
             artifacts_dir: &artifacts,
+            battleye_runtime: settings.anticheat.battleye.as_deref(),
+            eac_runtime: settings.anticheat.eac.as_deref(),
+            umu_runtime_update: settings.umu_runtime_update,
         },
     );
 
@@ -449,7 +452,7 @@ fn write_log(log: &Mutex<File>, text: &str) -> io::Result<()> {
     file.write_all(text.as_bytes())
 }
 
-/// Creates/updates the profile's prefix (wine), with setup processes tagged like the run.
+/// Creates/updates the profile's prefix, with setup processes tagged like the run.
 pub fn ensure_prefix(
     settings: &Settings,
     profile: &Profile,
@@ -463,13 +466,14 @@ pub fn ensure_prefix(
             search_path: &settings.search_path,
             lock_dir: &settings.dirs.runtime,
             tags: &tags,
+            umu_runtime_update: settings.umu_runtime_update,
         },
         |prefix| process::prefix_in_use(&process::scan(), prefix),
     )
 }
 
-/// `--- prefix ---` section for run logs: what setup did and what is linked.
-pub fn prefix_section(report: &prefix::Report) -> String {
+/// `--- prefix ---` section for run logs: what setup did and, for wine, what is linked.
+pub fn prefix_section(runner: Runner, report: &prefix::Report) -> String {
     let mut out = String::from("--- prefix ---\n");
     if report.created {
         out += "created\n";
@@ -477,14 +481,23 @@ pub fn prefix_section(report: &prefix::Report) -> String {
     for change in &report.changes {
         out += &format!("{change}\n");
     }
-    for (name, linked) in [("dxvk", &report.state.dxvk), ("vkd3d", &report.state.vkd3d)] {
-        let source = linked.as_ref().map_or("wine builtin".into(), |linked| {
-            linked.source.display().to_string()
-        });
-        out += &format!("{name}: {source}\n");
+    if runner == Runner::Wine {
+        for (name, linked) in [("dxvk", &report.state.dxvk), ("vkd3d", &report.state.vkd3d)] {
+            let source = linked.as_ref().map_or("wine builtin".into(), |linked| {
+                linked.source.display().to_string()
+            });
+            out += &format!("{name}: {source}\n");
+        }
     }
     if !report.output.trim().is_empty() {
-        out += &format!("wineboot output:\n{}\n", report.output.trim_end());
+        let command = match runner {
+            Runner::Umu => "createprefix",
+            _ => "wineboot",
+        };
+        out += &format!("{command} output:\n{}\n", report.output.trim_end());
+    }
+    if out == "--- prefix ---\n" {
+        out += "unchanged\n";
     }
     out
 }
@@ -539,10 +552,17 @@ pub fn header(
             let version = diag::runner_version(runner).unwrap_or_else(|| "unknown".into());
             out += &format!("runner: {version} ({})\n", runner.display());
         }
+        if profile.runner == Runner::Umu
+            && let Some(proton) = spec.env.get("PROTONPATH")
+        {
+            let proton = Path::new(proton);
+            let version = diag::proton_version(proton).unwrap_or_else(|| "unknown".into());
+            out += &format!("proton: {version} ({})\n", proton.display());
+        }
     }
 
     if let Some(report) = prefix {
-        out += &prefix_section(report);
+        out += &prefix_section(profile.runner, report);
     }
 
     let system = SystemInfo::collect();
@@ -592,19 +612,10 @@ pub fn init(settings: &Settings, name: &str, out: &mut impl Write) -> Result<(),
         .profile(name)
         .ok_or_else(|| AppError::UnknownProfile(name.to_owned()))?;
     check_issues(&profile.validate(&validation_context(settings)))?;
-    match profile.runner {
-        Runner::Native => {
-            return Err(AppError::Invalid(format!(
-                "profile `{name}` uses runner `native`, which has no prefix"
-            )));
-        }
-        Runner::Umu => {
-            return Err(AppError::NotImplemented {
-                command: "init for umu profiles",
-                milestone: "M5",
-            });
-        }
-        Runner::Wine => {}
+    if profile.runner == Runner::Native {
+        return Err(AppError::Invalid(format!(
+            "profile `{name}` uses runner `native`, which has no prefix"
+        )));
     }
 
     let started_at = Local::now();
@@ -633,7 +644,7 @@ pub fn init(settings: &Settings, name: &str, out: &mut impl Write) -> Result<(),
         &Tag::Session(format!("init:{name}:{stamp}")),
     );
     match &result {
-        Ok(Some(report)) => log += &prefix_section(report),
+        Ok(Some(report)) => log += &prefix_section(profile.runner, report),
         Ok(None) => {}
         Err(err) => log += &format!("=== prefix setup failed ===\n{err}\n"),
     }

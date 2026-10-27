@@ -40,6 +40,9 @@ impl Fixture {
             debug: false,
             extra_args,
             artifacts_dir: self.dir.path(),
+            battleye_runtime: None,
+            eac_runtime: None,
+            umu_runtime_update: false,
         }
     }
 
