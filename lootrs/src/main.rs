@@ -22,7 +22,7 @@ fn main() -> ExitCode {
     };
 
     match app::run(&settings) {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(code) => ExitCode::from(code),
         Err(err) => {
             tracing::error!("{err}");
             // The stderr log layer is off while the TUI owns the terminal.

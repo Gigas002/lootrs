@@ -43,7 +43,7 @@ fn run_with_extra_args() {
         cli.action,
         Action::Run {
             game: "wow".into(),
-            wait: true,
+            mode: LaunchMode::Wait,
             debug: false,
             args: vec!["-console".into(), "--wait".into()],
         }
@@ -59,7 +59,7 @@ fn execute_target_and_args() {
         Action::Execute {
             profile: "default".into(),
             target: "/tmp/setup.exe".into(),
-            wait: false,
+            mode: LaunchMode::Detach,
             debug: false,
             args: vec!["/S".into()],
         }
@@ -152,5 +152,27 @@ fn logs_path_flag() {
             game: "wow".into(),
             path_only: true,
         }
+    );
+}
+
+#[test]
+fn supervised_is_hidden_and_conflicts_with_wait() {
+    let help = Cli::command()
+        .find_subcommand_mut("run")
+        .unwrap()
+        .render_help()
+        .to_string();
+    assert!(!help.contains("supervised"));
+
+    assert!(matches!(
+        parse(&["run", "wow", "--supervised"]).action,
+        Action::Run {
+            mode: LaunchMode::Supervised,
+            ..
+        }
+    ));
+    assert_eq!(
+        parse_err(&["run", "wow", "--supervised", "--wait"]),
+        ErrorKind::ArgumentConflict
     );
 }

@@ -1,15 +1,16 @@
 //! Command handlers. Each writes its output to `out` so tests can capture it.
 
-use std::io::Write;
+use std::io::{self, Write};
 
 use liblootrs::{
     model::{Issue, Severity, Subject, ValidationContext},
+    runlog::{self, RunKind},
     store::{self, Catalog},
 };
 
 use super::AppError;
 use crate::{
-    settings::CheckTarget,
+    settings::{CheckTarget, Settings},
     utils::{plural, table},
 };
 
@@ -70,6 +71,24 @@ pub fn profiles(catalog: &Catalog, out: &mut impl Write) -> Result<(), AppError>
     });
 
     write!(out, "{}", table(std::iter::once(header).chain(rows)))?;
+    Ok(())
+}
+
+/// `lootrs logs`: the latest run log of a game, or its path.
+pub fn logs(
+    settings: &Settings,
+    game: &str,
+    path_only: bool,
+    out: &mut impl Write,
+) -> Result<(), AppError> {
+    let path = runlog::latest(&settings.logging.dir, RunKind::Game(game))
+        .ok_or_else(|| AppError::NoLogs(game.to_owned()))?;
+    if path_only {
+        writeln!(out, "{}", path.display())?;
+    } else {
+        let mut file = std::fs::File::open(&path)?;
+        io::copy(&mut file, out)?;
+    }
     Ok(())
 }
 

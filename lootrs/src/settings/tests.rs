@@ -182,3 +182,65 @@ fn missing_home_is_an_error() {
 
     assert!(matches!(err, SettingsError::Paths(PathsError::NoHome)));
 }
+
+#[test]
+fn search_path_keeps_absolute_dirs() {
+    let root = tempfile::tempdir().unwrap();
+    let base = env(root.path());
+    let lookup = move |key: &str| match key {
+        "PATH" => Some(OsString::from("/usr/bin:relative::/opt/bin")),
+        key => base(key),
+    };
+
+    let settings = Settings::resolve(CliOverrides::default(), lookup).unwrap();
+
+    assert_eq!(
+        settings.search_path,
+        [Path::new("/usr/bin"), Path::new("/opt/bin")]
+    );
+}
+
+#[test]
+fn execute_paths_become_absolute_bare_names_stay() {
+    let root = tempfile::tempdir().unwrap();
+    let execute = |target: &str| CliOverrides {
+        action: Action::Execute {
+            profile: "p".into(),
+            target: target.into(),
+            mode: LaunchMode::Detach,
+            debug: false,
+            args: Vec::new(),
+        },
+        ..CliOverrides::default()
+    };
+    let target = |cli| match Settings::resolve(cli, env(root.path())).unwrap().action {
+        Action::Execute { target, .. } => target,
+        _ => unreachable!(),
+    };
+
+    assert_eq!(target(execute("winecfg")), Path::new("winecfg"));
+    assert_eq!(
+        target(execute("dl/setup.exe")),
+        std::env::current_dir().unwrap().join("dl/setup.exe")
+    );
+}
+
+#[test]
+fn supervisor_does_not_log_to_stderr() {
+    let root = tempfile::tempdir().unwrap();
+    let run = |mode| CliOverrides {
+        action: Action::Run {
+            game: "g".into(),
+            mode,
+            debug: false,
+            args: Vec::new(),
+        },
+        ..CliOverrides::default()
+    };
+
+    let supervised = Settings::resolve(run(LaunchMode::Supervised), env(root.path())).unwrap();
+    let detached = Settings::resolve(run(LaunchMode::Detach), env(root.path())).unwrap();
+
+    assert!(!supervised.logging.stderr);
+    assert!(detached.logging.stderr);
+}

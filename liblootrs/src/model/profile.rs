@@ -203,6 +203,10 @@ impl Profile {
             (None, _) => {}
         }
 
+        if runner == Runner::Native && !self.runner_args.is_empty() {
+            issues.warn(ignored("runner_args"));
+        }
+
         if runner == Runner::Native {
             if !self.dll_overrides.is_empty() {
                 issues.warn(ignored("dll_overrides"));

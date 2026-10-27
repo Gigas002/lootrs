@@ -38,6 +38,19 @@ pub enum LogLevel {
     Trace,
 }
 
+impl LogLevel {
+    /// The name used in `config.toml` and `--log-level`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Error => "error",
+            Self::Warn => "warn",
+            Self::Info => "info",
+            Self::Debug => "debug",
+            Self::Trace => "trace",
+        }
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
     #[error("failed to read {}: {source}", path.display())]

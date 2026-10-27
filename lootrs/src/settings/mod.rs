@@ -35,7 +35,7 @@ pub enum Action {
     Tui,
     Run {
         game: String,
-        wait: bool,
+        mode: LaunchMode,
         debug: bool,
         args: Vec<String>,
     },
@@ -55,8 +55,9 @@ pub enum Action {
     },
     Execute {
         profile: String,
+        /// Absolute when given as a path; bare names (`winecfg`) stay as they are.
         target: PathBuf,
-        wait: bool,
+        mode: LaunchMode,
         debug: bool,
         args: Vec<String>,
     },
@@ -76,6 +77,18 @@ pub enum Action {
         game: String,
         path_only: bool,
     },
+}
+
+/// How `run` and `execute` relate to the launched process.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum LaunchMode {
+    /// Hand off to a detached supervisor and return once the game started.
+    #[default]
+    Detach,
+    /// Supervise in the foreground, mirroring output to the terminal.
+    Wait,
+    /// This process is the detached supervisor (hidden `--supervised` flag).
+    Supervised,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -110,6 +123,8 @@ impl Action {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Settings {
     pub dirs: Dirs,
+    /// Absolute directories from `PATH`, for resolving runners and wrappers.
+    pub search_path: Vec<PathBuf>,
     pub logging: Logging,
     pub stop_timeout: Duration,
     pub umu_runtime_update: bool,
@@ -132,7 +147,7 @@ pub struct Logging {
     pub dir: PathBuf,
     /// Run logs per game/profile, and daily app logs, to keep.
     pub keep: usize,
-    /// Mirror the app log to stderr (off while the TUI owns the terminal).
+    /// Mirror the app log to stderr (off for the TUI and the detached supervisor).
     pub stderr: bool,
 }
 
@@ -170,6 +185,13 @@ impl Settings {
     where
         F: Fn(&str) -> Option<OsString>,
     {
+        let search_path = lookup("PATH")
+            .map(|path| {
+                std::env::split_paths(&path)
+                    .filter(|dir| dir.is_absolute())
+                    .collect()
+            })
+            .unwrap_or_default();
         let xdg = XdgDirs::from_lookup(lookup)?;
         let defaults = AppDirs::new(&xdg);
 
@@ -189,6 +211,39 @@ impl Settings {
             return Err(SettingsError::LogKeep);
         }
 
+        let stderr = !matches!(
+            cli.action,
+            Action::Tui
+                | Action::Run {
+                    mode: LaunchMode::Supervised,
+                    ..
+                }
+                | Action::Execute {
+                    mode: LaunchMode::Supervised,
+                    ..
+                }
+        );
+        let action = match cli.action {
+            Action::Execute {
+                profile,
+                target,
+                mode,
+                debug,
+                args,
+            } => Action::Execute {
+                profile,
+                target: if target.components().count() > 1 {
+                    absolute(target)?
+                } else {
+                    target
+                },
+                mode,
+                debug,
+                args,
+            },
+            action => action,
+        };
+
         Ok(Self {
             dirs: Dirs {
                 config: config_dir,
@@ -197,11 +252,12 @@ impl Settings {
                     .unwrap_or(defaults.prefixes),
                 home: xdg.home.clone(),
             },
+            search_path,
             logging: Logging {
                 level: cli.log_level.or(file.log_level).unwrap_or_default(),
                 dir: log_dir,
                 keep,
-                stderr: cli.action != Action::Tui,
+                stderr,
             },
             stop_timeout: Duration::from_secs(
                 file.stop_timeout_secs.unwrap_or(DEFAULT_STOP_TIMEOUT_SECS),
@@ -211,7 +267,7 @@ impl Settings {
                 battleye: from_config("battleye_runtime", file.battleye_runtime)?,
                 eac: from_config("eac_runtime", file.eac_runtime)?,
             },
-            action: cli.action,
+            action,
         })
     }
 }

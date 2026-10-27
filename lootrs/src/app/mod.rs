@@ -1,12 +1,16 @@
 //! Command dispatch. Commands not built yet report their milestone (see `docs/PLAN.md`).
 
-use std::io::{self, Write};
+use std::{
+    io::{self, Write},
+    path::PathBuf,
+};
 
-use liblootrs::{model::ValidationContext, store::Catalog};
+use liblootrs::{launch::LaunchError, model::ValidationContext, store::Catalog};
 
 use crate::settings::{Action, Settings};
 
 pub mod commands;
+pub mod supervisor;
 
 #[cfg(test)]
 mod tests;
@@ -28,6 +32,28 @@ pub enum AppError {
     #[error("check found {0}")]
     CheckFailed(String),
 
+    #[error("not launching:\n{0}")]
+    Invalid(String),
+
+    #[error("not launching:\n{0}")]
+    Preflight(LaunchError),
+
+    #[error("failed to start {}: {source}", program.display())]
+    Spawn { program: PathBuf, source: io::Error },
+
+    #[error("failed to write the run log: {0}")]
+    RunLog(io::Error),
+
+    #[error("failed to start the supervisor: {0}")]
+    Detach(io::Error),
+
+    /// An error reported by the detached supervisor.
+    #[error("{message}")]
+    Supervisor { code: u8, message: String },
+
+    #[error("no run logs for `{0}` yet")]
+    NoLogs(String),
+
     #[error("failed to write output: {0}")]
     Output(#[from] io::Error),
 }
@@ -37,32 +63,77 @@ impl AppError {
     /// 3 not running, 4 already running.
     pub fn exit_code(&self) -> u8 {
         match self {
-            Self::NotImplemented { .. } | Self::Output(_) => 1,
-            Self::UnknownGame(_) | Self::UnknownProfile(_) | Self::CheckFailed(_) => 2,
+            Self::NotImplemented { .. }
+            | Self::Spawn { .. }
+            | Self::RunLog(_)
+            | Self::Detach(_)
+            | Self::NoLogs(_)
+            | Self::Output(_) => 1,
+            Self::UnknownGame(_)
+            | Self::UnknownProfile(_)
+            | Self::CheckFailed(_)
+            | Self::Invalid(_)
+            | Self::Preflight(_) => 2,
+            Self::Supervisor { code, .. } => *code,
         }
     }
 }
 
-pub fn run(settings: &Settings) -> Result<(), AppError> {
+/// Runs the resolved action; `Ok` carries the process exit code.
+pub fn run(settings: &Settings) -> Result<u8, AppError> {
     let action = &settings.action;
     let _span = tracing::info_span!("command", name = action.name()).entered();
     tracing::debug!(?settings, "resolved settings");
 
-    let mut out = io::stdout().lock();
-    match action {
-        Action::List { json: false } => commands::list(&load_catalog(settings), &mut out),
-        Action::Profiles { json: false } => commands::profiles(&load_catalog(settings), &mut out),
-        Action::Check { target } => commands::check(
+    // Not locked: the supervisor's output threads write to stdout too.
+    let mut out = io::stdout();
+    let done = |result: Result<(), AppError>| result.map(|()| 0);
+    let code = match action {
+        Action::Run {
+            game,
+            mode,
+            debug,
+            args,
+        } => supervisor::launch(
+            settings,
+            supervisor::Request::Game { name: game },
+            *mode,
+            *debug,
+            args,
+            &mut out,
+        ),
+        Action::Execute {
+            profile,
+            target,
+            mode,
+            debug,
+            args,
+        } => supervisor::launch(
+            settings,
+            supervisor::Request::Execute {
+                profile,
+                program: target,
+            },
+            *mode,
+            *debug,
+            args,
+            &mut out,
+        ),
+        Action::Logs { game, path_only } => {
+            done(commands::logs(settings, game, *path_only, &mut out))
+        }
+        Action::List { json: false } => done(commands::list(&load_catalog(settings), &mut out)),
+        Action::Profiles { json: false } => {
+            done(commands::profiles(&load_catalog(settings), &mut out))
+        }
+        Action::Check { target } => done(commands::check(
             &Catalog::load(&settings.dirs.config),
             &validation_context(settings),
             target,
             &mut out,
-        ),
+        )),
         Action::List { json: true } | Action::Profiles { json: true } => {
             not_implemented("--json", "M7")
-        }
-        Action::Run { .. } | Action::Execute { .. } | Action::Logs { .. } => {
-            not_implemented(action.name(), "M2")
         }
         Action::Stop { .. } | Action::Killall { .. } | Action::Status { .. } => {
             not_implemented(action.name(), "M3")
@@ -71,7 +142,7 @@ pub fn run(settings: &Settings) -> Result<(), AppError> {
         Action::Tui => not_implemented(action.name(), "M6"),
     }?;
     out.flush()?;
-    Ok(())
+    Ok(code)
 }
 
 /// Loads the catalog, logging files that failed to load (`check` reports them itself).
@@ -91,6 +162,6 @@ pub fn validation_context(settings: &Settings) -> ValidationContext<'_> {
     }
 }
 
-fn not_implemented(command: &'static str, milestone: &'static str) -> Result<(), AppError> {
+fn not_implemented(command: &'static str, milestone: &'static str) -> Result<u8, AppError> {
     Err(AppError::NotImplemented { command, milestone })
 }

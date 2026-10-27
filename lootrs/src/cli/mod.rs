@@ -7,7 +7,7 @@ use clap::{ArgAction, Parser, Subcommand};
 
 use crate::{
     config::LogLevel,
-    settings::{Action, CheckTarget, CliOverrides},
+    settings::{Action, CheckTarget, CliOverrides, LaunchMode},
 };
 
 #[cfg(test)]
@@ -56,6 +56,9 @@ pub enum Command {
         /// Stay attached: stream output and exit with the game's exit code.
         #[arg(long)]
         wait: bool,
+        /// Internal: act as the detached supervisor.
+        #[arg(long, hide = true, conflicts_with = "wait")]
+        supervised: bool,
         /// Verbose runner logging for this run.
         #[arg(long)]
         debug: bool,
@@ -99,6 +102,9 @@ pub enum Command {
         /// Stay attached: stream output and exit with the program's exit code.
         #[arg(long)]
         wait: bool,
+        /// Internal: act as the detached supervisor.
+        #[arg(long, hide = true, conflicts_with = "wait")]
+        supervised: bool,
         /// Verbose runner logging for this run.
         #[arg(long)]
         debug: bool,
@@ -171,11 +177,12 @@ impl From<Command> for Action {
             Command::Run {
                 game,
                 wait,
+                supervised,
                 debug,
                 args,
             } => Self::Run {
                 game,
-                wait,
+                mode: launch_mode(wait, supervised),
                 debug,
                 args,
             },
@@ -187,12 +194,13 @@ impl From<Command> for Action {
                 profile,
                 target,
                 wait,
+                supervised,
                 debug,
                 args,
             } => Self::Execute {
                 profile,
                 target,
-                wait,
+                mode: launch_mode(wait, supervised),
                 debug,
                 args,
             },
@@ -211,5 +219,13 @@ impl From<Command> for Action {
                 path_only: path,
             },
         }
+    }
+}
+
+fn launch_mode(wait: bool, supervised: bool) -> LaunchMode {
+    match (wait, supervised) {
+        (_, true) => LaunchMode::Supervised,
+        (true, false) => LaunchMode::Wait,
+        (false, false) => LaunchMode::Detach,
     }
 }

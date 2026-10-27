@@ -24,6 +24,18 @@ fn unimplemented_commands_fail_with_runtime_code() {
 }
 
 #[test]
+fn logs_without_runs() {
+    let err = run(&settings(Action::Logs {
+        game: "wow".into(),
+        path_only: true,
+    }))
+    .unwrap_err();
+
+    assert_eq!(err.exit_code(), 1);
+    assert_eq!(err.to_string(), "no run logs for `wow` yet");
+}
+
+#[test]
 fn json_output_is_not_implemented_yet() {
     let err = run(&settings(Action::List { json: true })).unwrap_err();
 

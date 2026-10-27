@@ -25,7 +25,9 @@ umu = ["liblootrs/umu"]
 
 [dependencies]
 liblootrs = { path = "../liblootrs", version = "0.1.0", default-features = false }
+chrono.workspace = true
 clap.workspace = true
+rustix.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 toml.workspace = true
