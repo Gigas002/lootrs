@@ -1,0 +1,27 @@
+# lootrs global settings: ~/.config/lootrs/config.toml
+# Every key is optional; the values below are the built-in defaults.
+# Paths may start with `~`; after expansion they must be absolute.
+
+# Level for lootrs's own log: error | warn | info | debug | trace.
+# Overridden by --log-level, -v/-vv or -q.
+log_level = "info"
+
+# Where logs go. Default: $XDG_STATE_HOME/lootrs/logs (~/.local/state/lootrs/logs).
+# log_dir = "~/.local/state/lootrs/logs"
+
+# Run logs kept per game/profile, and daily app logs kept.
+log_keep = 10
+
+# Seconds between SIGTERM and SIGKILL when stopping a game.
+stop_timeout_secs = 5
+
+# Suggested root for new profile prefixes in the TUI.
+# Default: $XDG_DATA_HOME/lootrs/prefixes (~/.local/share/lootrs/prefixes).
+# prefix_root = "~/.local/share/lootrs/prefixes"
+
+# Let umu update its Steam Linux Runtime. When false, lootrs exports UMU_RUNTIME_UPDATE=0.
+umu_runtime_update = false
+
+# User-installed anti-cheat runtimes, used by profiles with battleye/eac enabled.
+# battleye_runtime = "~/.local/share/Steam/steamapps/common/Proton BattlEye Runtime"
+# eac_runtime = "~/.local/share/Steam/steamapps/common/Proton EasyAntiCheat Runtime"
