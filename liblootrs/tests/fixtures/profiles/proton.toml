@@ -1,0 +1,18 @@
+# A Proton profile using a Steam-installed build.
+name = "proton"
+runner = "proton"
+# Shared by every game using this profile. Leave it out to give each game its
+# own Steam compatdata prefix.
+prefix = "~/prefixes/proton"
+wrappers = ["gamemoderun"]
+# Steam integration: auto (bridge when Steam is running) | host | none.
+steam = "auto"
+
+[proton]
+build = "experimental"            # a Steam build name, or a path
+
+[env]
+PROTON_ENABLE_WAYLAND = "1"
+
+[dll_overrides]
+winhttp = "n,b"

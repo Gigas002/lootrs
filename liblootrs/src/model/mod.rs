@@ -13,7 +13,9 @@ mod game;
 mod profile;
 
 pub use game::Game;
-pub use profile::{Anticheat, Profile, Runner, UmuSection, WineSection};
+pub use profile::{
+    Anticheat, Profile, ProtonSection, Runner, SteamIntegration, UmuSection, WineSection,
+};
 
 use crate::paths;
 

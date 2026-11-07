@@ -8,12 +8,18 @@ use super::{Issue, Issues, Subject, ValidationContext};
 ///
 /// Settings that don't apply to the selected runner are kept but ignored,
 /// so switching `runner` back and forth never loses data.
+///
+/// `runner = "proton"`, `[proton]` and `steam` describe a launch through
+/// Steam's Proton, for clients that start games through Steam. They are part
+/// of the schema so such profiles load, but lootrs itself can't launch a
+/// `proton` profile.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Profile {
     /// Must equal the file stem.
     pub name: String,
     pub runner: Runner,
-    /// Wine prefix; required for wine and umu.
+    /// Wine prefix; required for wine and umu. For `proton` it is the
+    /// `STEAM_COMPAT_DATA_PATH`, and optional.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prefix: Option<PathBuf>,
     /// Inserted between the runner binary and the executable.
@@ -40,6 +46,12 @@ pub struct Profile {
     pub wine: Option<WineSection>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub umu: Option<UmuSection>,
+    /// The `proton` runner's build.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proton: Option<ProtonSection>,
+    /// The `proton` runner's Steam integration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub steam: Option<SteamIntegration>,
     #[serde(default, skip_serializing_if = "Anticheat::is_off")]
     pub anticheat: Anticheat,
 }
@@ -51,6 +63,9 @@ pub enum Runner {
     Umu,
     /// Run the executable as is.
     Native,
+    /// Steam's Proton (`proton run`), launched through Steam; lootrs can't
+    /// launch it.
+    Proton,
 }
 
 /// `[wine]` section.
@@ -79,6 +94,54 @@ pub struct UmuSection {
     pub store: Option<String>,
 }
 
+/// `[proton]` section, for the `proton` runner.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProtonSection {
+    /// A Steam-installed build name (`experimental`, `9.0`, ...) or the path
+    /// of a Proton directory. `None` is the default build.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build: Option<String>,
+}
+
+impl ProtonSection {
+    /// Whether `build` names a directory rather than a Steam build.
+    pub fn build_is_path(&self) -> bool {
+        self.build
+            .as_deref()
+            .is_some_and(|build| build.starts_with(['/', '~']) || build.contains('/'))
+    }
+}
+
+/// `steam`: whether a Proton launch talks to the host Steam client.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SteamIntegration {
+    /// Bridge to the host Steam client when it is running.
+    #[default]
+    Auto,
+    /// Always bridge; start the host Steam client when needed. Needed for
+    /// Steamworks DRM and Family-Shared games.
+    Host,
+    /// Never bridge: the game sees no Steam client.
+    None,
+}
+
+impl SteamIntegration {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Host => "host",
+            Self::None => "none",
+        }
+    }
+}
+
+impl fmt::Display for SteamIntegration {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// `[anticheat]` section; both off by default.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Anticheat {
@@ -100,15 +163,18 @@ impl Runner {
             Self::Wine => "wine",
             Self::Umu => "umu",
             Self::Native => "native",
+            Self::Proton => "proton",
         }
     }
 
-    /// Whether this build of lootrs includes the runner (Cargo features `wine`/`umu`).
+    /// Whether this build of lootrs can launch the runner (Cargo features
+    /// `wine`/`umu`). `proton` never is: it runs through Steam.
     pub fn is_available(self) -> bool {
         match self {
             Self::Wine => cfg!(feature = "wine"),
             Self::Umu => cfg!(feature = "umu"),
             Self::Native => true,
+            Self::Proton => false,
         }
     }
 
@@ -139,6 +205,8 @@ impl Profile {
             dll_overrides: BTreeMap::new(),
             wine: None,
             umu: None,
+            proton: None,
+            steam: None,
             anticheat: Anticheat::default(),
         }
     }
@@ -148,6 +216,12 @@ impl Profile {
         let runner = self.runner;
         let ignored = |field: &str| format!("`{field}` is ignored for runner `{runner}`");
         issues.name(&self.name);
+
+        if runner == Runner::Proton {
+            issues.error(crate::launch::PROTON_UNSUPPORTED);
+            // The other fields mean what the Steam launch makes of them.
+            return issues.finish();
+        }
 
         if !runner.is_available() {
             issues.error(format!(
@@ -174,7 +248,7 @@ impl Profile {
                     "{}: Proton ships its own; point `[umu].proton` at another Proton build instead",
                     ignored(field)
                 )),
-                Runner::Native => issues.warn(ignored(field)),
+                Runner::Native | Runner::Proton => issues.warn(ignored(field)),
             }
         }
 

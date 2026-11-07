@@ -98,6 +98,10 @@ impl LaunchSpec {
     }
 }
 
+/// Why a `proton` profile doesn't launch here.
+pub(crate) const PROTON_UNSUPPORTED: &str =
+    "runner `proton` runs through Steam; lootrs can't launch it";
+
 /// Every problem that prevents a launch.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LaunchError {
@@ -120,6 +124,11 @@ pub fn prepare(
     tag: &Tag,
     ctx: &LaunchContext,
 ) -> Result<LaunchSpec, LaunchError> {
+    if profile.runner == Runner::Proton {
+        return Err(LaunchError {
+            problems: vec![PROTON_UNSUPPORTED.into()],
+        });
+    }
     let mut problems = Vec::new();
     let home = ctx.home;
 
@@ -148,7 +157,7 @@ pub fn prepare(
         Target::Tricks { verbs } => {
             let winetricks = Path::new("winetricks");
             let exe = match profile.runner {
-                Runner::Native => {
+                Runner::Native | Runner::Proton => {
                     problems.push("`tricks` needs a wine or umu profile".into());
                     winetricks.to_path_buf()
                 }

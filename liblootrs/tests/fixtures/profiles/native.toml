@@ -1,0 +1,7 @@
+# Runs Linux builds directly.
+name = "native"
+runner = "native"
+wrappers = ["gamemoderun"]
+
+[env]
+SDL_VIDEODRIVER = "wayland"

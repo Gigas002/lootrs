@@ -307,3 +307,12 @@ fn preflight_finds_missing_wine() {
     fx.executable("bin/wine");
     assert!(preflight(&profile, &fx.ctx(&[])).is_empty());
 }
+
+#[test]
+fn proton_profile_is_refused() {
+    let fx = Fixture::new();
+    let profile = Profile::new("p", Runner::Proton);
+    let err = prepare(Target::Game(&fx.game()), &profile, &tag(), &fx.ctx(&[])).unwrap_err();
+    assert_eq!(err.problems, [PROTON_UNSUPPORTED]);
+    assert_eq!(preflight(&profile, &fx.ctx(&[])), [PROTON_UNSUPPORTED]);
+}

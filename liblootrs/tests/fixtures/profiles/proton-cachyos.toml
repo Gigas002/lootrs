@@ -1,0 +1,11 @@
+# A Proton profile using a build from a directory.
+name = "proton-cachyos"
+runner = "proton"
+prefix = "~/prefixes/cachyos"
+wrappers = ["mangohud", "gamemoderun"]
+
+[proton]
+build = "/usr/share/steam/compatibilitytools.d/proton-cachyos"
+
+[anticheat]
+eac = true

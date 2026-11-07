@@ -103,6 +103,47 @@ fn native_profile_is_always_available() {
     );
 }
 
+#[test]
+fn proton_is_not_launched() {
+    assert!(!Runner::Proton.is_available());
+    // Only the one error: the rest of a `proton` profile isn't lootrs' to judge.
+    let profile = Profile {
+        prefix: Some("relative".into()),
+        proton: Some(ProtonSection {
+            build: Some("experimental".into()),
+        }),
+        steam: Some(SteamIntegration::Host),
+        ..Profile::new("proton", Runner::Proton)
+    };
+    assert_eq!(
+        errors(&profile.validate(&ctx())),
+        ["runner `proton` runs through Steam; lootrs can't launch it"]
+    );
+    assert!(warnings(&profile.validate(&ctx())).is_empty());
+}
+
+#[test]
+fn proton_sections_are_kept_quietly() {
+    let profile = Profile {
+        proton: Some(ProtonSection::default()),
+        steam: Some(SteamIntegration::None),
+        ..Profile::new("native", Runner::Native)
+    };
+    assert_eq!(profile.validate(&ctx()), Vec::new());
+}
+
+#[test]
+fn proton_build_is_path() {
+    let build = |b: &str| ProtonSection {
+        build: Some(b.into()),
+    };
+    assert!(build("/opt/proton").build_is_path());
+    assert!(build("~/proton").build_is_path());
+    assert!(build("dir/proton").build_is_path());
+    assert!(!build("experimental").build_is_path());
+    assert!(!ProtonSection::default().build_is_path());
+}
+
 #[cfg(not(feature = "umu"))]
 #[test]
 fn runner_without_feature_is_an_error() {

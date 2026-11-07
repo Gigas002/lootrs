@@ -647,10 +647,14 @@ impl Tui {
                     .collect();
                 Form::game(name.and_then(|n| self.catalog.game(n)), runners)
             }
-            Tab::Profiles => Form::profile(
-                name.and_then(|n| self.catalog.profile(n)),
-                &self.settings.dirs.prefix_root,
-            ),
+            Tab::Profiles => {
+                let profile = name.and_then(|n| self.catalog.profile(n));
+                if profile.is_some_and(|p| p.runner == Runner::Proton) {
+                    self.error("`proton` profiles run through Steam: edit them by hand");
+                    return;
+                }
+                Form::profile(profile, &self.settings.dirs.prefix_root)
+            }
         };
         self.form = Some(form);
     }

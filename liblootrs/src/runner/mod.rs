@@ -35,6 +35,7 @@ pub fn command(
 ) -> Result<RunnerCommand, Vec<String>> {
     let command: Result<RunnerCommand, _> = match profile.runner {
         Runner::Native => return Ok(native::command()),
+        Runner::Proton => return Err(vec![crate::launch::PROTON_UNSUPPORTED.into()]),
         #[cfg(feature = "wine")]
         Runner::Wine => wine::command(profile, prefix, debug, ctx),
         #[cfg(feature = "umu")]

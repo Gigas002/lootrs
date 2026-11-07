@@ -435,3 +435,29 @@ fn summarize_groups_by_owner() {
         )])
     );
 }
+
+#[test]
+fn proton_profiles_are_not_edited() {
+    let (dir, _) = fixture();
+    let config = dir.path().join("config");
+    std::fs::write(
+        config.join("profiles/p.toml"),
+        "name = \"p\"\nrunner = \"proton\"\n",
+    )
+    .unwrap();
+    let mut tui = Tui::new(settings(dir.path()));
+    // Profiles sort n, p, w.
+    press(&mut tui, &[Key::Char('2'), Key::Down]);
+    assert_eq!(tui.selected_profile().unwrap().name, "p");
+
+    tui.handle_key(Key::Char('e'));
+
+    assert!(tui.form.is_none());
+    assert_eq!(
+        status(&tui),
+        (
+            "`proton` profiles run through Steam: edit them by hand",
+            true
+        )
+    );
+}

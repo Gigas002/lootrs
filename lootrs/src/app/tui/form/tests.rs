@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 
-use liblootrs::model::{Anticheat, Game, Profile, Runner, UmuSection, WineSection};
+use liblootrs::model::{
+    Anticheat, Game, Profile, ProtonSection, Runner, SteamIntegration, UmuSection, WineSection,
+};
 
 use super::*;
 
@@ -259,4 +261,17 @@ fn map_editor_requires_key_value() {
         form.to_profile().env,
         BTreeMap::from([("X".into(), "1".into())])
     );
+}
+
+#[test]
+fn proton_fields_survive_an_edit() {
+    let profile = Profile {
+        proton: Some(ProtonSection {
+            build: Some("experimental".into()),
+        }),
+        steam: Some(SteamIntegration::Host),
+        ..Profile::new("n", Runner::Native)
+    };
+    let form = Form::profile(Some(&profile), Path::new("/root"));
+    assert_eq!(form.to_profile(), profile);
 }

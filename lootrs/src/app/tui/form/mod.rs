@@ -6,7 +6,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use liblootrs::model::{Anticheat, Game, Profile, Runner, UmuSection, WineSection};
+use liblootrs::model::{
+    Anticheat, Game, Profile, ProtonSection, Runner, SteamIntegration, UmuSection, WineSection,
+};
 
 use super::Key;
 
@@ -188,6 +190,9 @@ pub struct Form {
     profile_runners: BTreeMap<String, Runner>,
     /// Default prefix location for new profiles (`<prefix_root>/<name>`).
     prefix_root: PathBuf,
+    /// `[proton]` and `steam` from the edited profile, written back
+    /// unchanged: the form has no fields for them.
+    steam_parts: (Option<ProtonSection>, Option<SteamIntegration>),
 }
 
 fn path_text(path: Option<&Path>) -> String {
@@ -381,13 +386,15 @@ impl Form {
             Field::new(FieldKey::Eac, "anticheat.eac", Value::Toggle(anticheat.eac))
                 .runners(PREFIXED),
         ];
-        Self::with_fields(
+        let mut form = Self::with_fields(
             Kind::Profile,
             profile.map(|p| p.name.clone()),
             fields,
             BTreeMap::new(),
             prefix_root.to_path_buf(),
-        )
+        );
+        form.steam_parts = profile.map_or_else(Default::default, |p| (p.proton.clone(), p.steam));
+        form
     }
 
     fn with_fields(
@@ -409,6 +416,7 @@ impl Form {
             dirty: false,
             profile_runners,
             prefix_root,
+            steam_parts: (None, None),
         }
     }
 
@@ -607,6 +615,8 @@ impl Form {
             dll_overrides: self.map(FieldKey::DllOverrides),
             wine,
             umu: (umu != UmuSection::default()).then_some(umu),
+            proton: self.steam_parts.0.clone(),
+            steam: self.steam_parts.1,
             anticheat: Anticheat {
                 battleye: self.toggle(FieldKey::Battleye),
                 eac: self.toggle(FieldKey::Eac),
