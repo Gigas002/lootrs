@@ -8,6 +8,8 @@ prefix = "~/.local/share/lootrs/prefixes/default"
 # runner_args = []                              # between the runner binary and the exe
 # wrappers = ["mangohud", "gamemoderun"]        # prepended to the whole command
 # debug = false                                 # verbose wine/DXVK logging in run logs
+# shader_cache = "~/.cache/lootrs/shaders"      # each game's DXVK/VKD3D/driver shader caches
+#                                               # in <dir>/<game>; "off" or unset: their defaults
 
 # DXVK / VKD3D-Proton you installed yourself; lootrs never downloads them.
 # dxvk = "~/.local/share/dxvk/dxvk-2.6"         # contains x64/ (and x32/)

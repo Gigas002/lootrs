@@ -1,4 +1,8 @@
-use std::{collections::BTreeMap, fmt, path::PathBuf};
+use std::{
+    collections::BTreeMap,
+    fmt,
+    path::{Path, PathBuf},
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -54,6 +58,77 @@ pub struct Profile {
     pub steam: Option<SteamIntegration>,
     #[serde(default, skip_serializing_if = "Anticheat::is_off")]
     pub anticheat: Anticheat,
+    /// Where each game's compiled shaders go. Unset leaves it to the client
+    /// (lootrs sets nothing then).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shader_cache: Option<ShaderCache>,
+}
+
+/// `shader_cache`: `"off"`, or a directory that holds one folder per game.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ShaderCache {
+    /// Set nothing: DXVK, VKD3D-Proton and the drivers use their own
+    /// defaults.
+    Off,
+    /// Each game's caches go in `<dir>/<game>`.
+    Dir(PathBuf),
+}
+
+impl ShaderCache {
+    pub fn parse(text: &str) -> Self {
+        if text.trim().eq_ignore_ascii_case("off") {
+            Self::Off
+        } else {
+            Self::Dir(PathBuf::from(text))
+        }
+    }
+
+    pub fn as_text(&self) -> String {
+        match self {
+            Self::Off => "off".to_owned(),
+            Self::Dir(dir) => dir.display().to_string(),
+        }
+    }
+
+    /// The variables that put one game's shader caches in `dir`, with the
+    /// layout Proton uses for its local shader cache: DXVK, VKD3D-Proton,
+    /// Mesa, NVIDIA, and AMD's own Vulkan driver.
+    pub fn env(dir: &Path) -> Vec<(&'static str, PathBuf)> {
+        vec![
+            ("DXVK_STATE_CACHE_PATH", dir.join("DXVK_state_cache")),
+            ("VKD3D_SHADER_CACHE_PATH", dir.join("VKD3D_shader_cache")),
+            ("MESA_SHADER_CACHE_DIR", dir.to_path_buf()),
+            ("__GL_SHADER_DISK_CACHE_PATH", dir.join("nvidiav1")),
+            ("AMD_VK_PIPELINE_CACHE_PATH", dir.join("AMDv1")),
+        ]
+    }
+
+    /// Create the directories [`Self::env`] names: not every driver creates
+    /// its own.
+    pub fn create_dirs(dir: &Path) -> std::io::Result<()> {
+        for (_, path) in Self::env(dir) {
+            std::fs::create_dir_all(path)?;
+        }
+        Ok(())
+    }
+}
+
+impl Serialize for ShaderCache {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.as_text())
+    }
+}
+
+impl<'de> Deserialize<'de> for ShaderCache {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        if text.trim().is_empty() {
+            return Err(serde::de::Error::custom(
+                "`shader_cache` is `off` or a directory",
+            ));
+        }
+        Ok(Self::parse(&text))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -208,6 +283,7 @@ impl Profile {
             proton: None,
             steam: None,
             anticheat: Anticheat::default(),
+            shader_cache: None,
         }
     }
 
@@ -227,6 +303,10 @@ impl Profile {
             issues.error(format!(
                 "runner `{runner}` is not available: lootrs was built without the `{runner}` feature"
             ));
+        }
+
+        if let Some(ShaderCache::Dir(dir)) = &self.shader_cache {
+            issues.absolute("shader_cache", dir, ctx.home);
         }
 
         match (&self.prefix, runner.uses_prefix()) {

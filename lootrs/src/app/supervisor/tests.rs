@@ -121,6 +121,7 @@ fn header_sections() {
         env: [("LOOTRS_GAME".to_owned(), OsString::from("g"))].into(),
         cwd: "/g".into(),
         runner: None,
+        shader_cache: None,
     };
 
     let header = header(

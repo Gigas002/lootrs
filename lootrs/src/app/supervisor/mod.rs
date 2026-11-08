@@ -22,7 +22,7 @@ use chrono::{DateTime, Local};
 use liblootrs::{
     diag::{self, SystemInfo},
     launch::{self, LaunchContext, LaunchSpec, Tag, Target},
-    model::{Issue, Profile, Runner, Severity},
+    model::{Issue, Profile, Runner, Severity, ShaderCache},
     prefix::{self, EnsureContext, PrefixError},
     process::{self, Owner},
     runlog::{self, RunKind, RunLog},
@@ -328,6 +328,16 @@ fn supervise(
             return Err(AppError::Preflight(err));
         }
     };
+
+    if let Some(dir) = &spec.shader_cache
+        && let Err(err) = ShaderCache::create_dirs(dir)
+    {
+        // The drivers fall back to their defaults; not worth failing for.
+        let _ = write_log(
+            &log,
+            &format!("=== shader cache {}: {err} ===\n", dir.display()),
+        );
+    }
 
     let mut child = match spawn(&spec) {
         Ok(child) => child,

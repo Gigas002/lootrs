@@ -397,3 +397,66 @@ fn game_id_ignored_outside_umu() {
             .contains(&"`game_id` is ignored: profile `default` uses runner `wine`")
     );
 }
+
+#[test]
+fn shader_cache_is_off_or_a_directory() {
+    let parse = |text: &str| -> Profile {
+        toml::from_str(&format!(
+            "name = \"p\"\nrunner = \"native\"\nshader_cache = \"{text}\"\n"
+        ))
+        .unwrap()
+    };
+    assert_eq!(parse("off").shader_cache, Some(ShaderCache::Off));
+    assert_eq!(
+        parse("~/cache").shader_cache,
+        Some(ShaderCache::Dir("~/cache".into()))
+    );
+    assert!(
+        toml::from_str::<Profile>("name = \"p\"\nrunner = \"native\"\nshader_cache = \"\"\n")
+            .is_err()
+    );
+    // Written back the way it was read.
+    let profile = parse("off");
+    let text = toml::to_string(&profile).unwrap();
+    assert!(text.contains("shader_cache = \"off\""), "{text}");
+    assert_eq!(toml::from_str::<Profile>(&text).unwrap(), profile);
+}
+
+#[test]
+fn shader_cache_directory_must_be_absolute() {
+    let profile = Profile {
+        shader_cache: Some(ShaderCache::Dir("cache".into())),
+        ..Profile::new("p", Runner::Native)
+    };
+    assert_eq!(
+        errors(&profile.validate(&ctx())),
+        ["`shader_cache` must be an absolute path (or start with `~`), got `cache`"]
+    );
+    let profile = Profile {
+        shader_cache: Some(ShaderCache::Dir("~/cache".into())),
+        ..Profile::new("p", Runner::Native)
+    };
+    assert!(errors(&profile.validate(&ctx())).is_empty());
+}
+
+#[test]
+fn shader_cache_env_follows_protons_layout() {
+    let env: BTreeMap<_, _> = ShaderCache::env(Path::new("/c/g")).into_iter().collect();
+    assert_eq!(
+        env["DXVK_STATE_CACHE_PATH"],
+        Path::new("/c/g/DXVK_state_cache")
+    );
+    assert_eq!(
+        env["VKD3D_SHADER_CACHE_PATH"],
+        Path::new("/c/g/VKD3D_shader_cache")
+    );
+    assert_eq!(env["MESA_SHADER_CACHE_DIR"], Path::new("/c/g"));
+    assert_eq!(
+        env["__GL_SHADER_DISK_CACHE_PATH"],
+        Path::new("/c/g/nvidiav1")
+    );
+
+    let dir = tempfile::tempdir().unwrap();
+    ShaderCache::create_dirs(&dir.path().join("g")).unwrap();
+    assert!(dir.path().join("g/DXVK_state_cache").is_dir());
+}

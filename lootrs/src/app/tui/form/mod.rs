@@ -7,7 +7,8 @@ use std::{
 };
 
 use liblootrs::model::{
-    Anticheat, Game, Profile, ProtonSection, Runner, SteamIntegration, UmuSection, WineSection,
+    Anticheat, Game, Profile, ProtonSection, Runner, ShaderCache, SteamIntegration, UmuSection,
+    WineSection,
 };
 
 use super::Key;
@@ -99,6 +100,7 @@ pub enum FieldKey {
     Store,
     Battleye,
     Eac,
+    ShaderCache,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -317,6 +319,15 @@ impl Form {
                 "debug",
                 Value::Toggle(profile.is_some_and(|p| p.debug)),
             ),
+            Field::text(
+                FieldKey::ShaderCache,
+                "shader_cache",
+                profile
+                    .and_then(|p| p.shader_cache.as_ref())
+                    .map(ShaderCache::as_text)
+                    .unwrap_or_default(),
+            )
+            .placeholder("off, or a directory: <dir>/<game> per game (optional)"),
             Field::new(
                 FieldKey::Env,
                 "env",
@@ -621,6 +632,9 @@ impl Form {
                 battleye: self.toggle(FieldKey::Battleye),
                 eac: self.toggle(FieldKey::Eac),
             },
+            shader_cache: self
+                .optional(FieldKey::ShaderCache)
+                .map(|text| ShaderCache::parse(&text)),
         }
     }
 }

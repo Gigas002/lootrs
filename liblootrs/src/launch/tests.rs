@@ -316,3 +316,34 @@ fn proton_profile_is_refused() {
     assert_eq!(err.problems, [PROTON_UNSUPPORTED]);
     assert_eq!(preflight(&profile, &fx.ctx(&[])), [PROTON_UNSUPPORTED]);
 }
+
+#[test]
+fn shader_cache_goes_under_the_game() {
+    let fx = Fixture::new();
+    let profile = Profile {
+        shader_cache: Some(crate::model::ShaderCache::Dir("~/shaders".into())),
+        env: BTreeMap::from([("MESA_SHADER_CACHE_DIR".into(), "/mine".into())]),
+        ..Profile::new("p", Runner::Native)
+    };
+    let game = fx.game();
+    let spec = prepare(Target::Game(&game), &profile, &tag(), &fx.ctx(&[])).unwrap();
+    let dir = fx.path("shaders/g");
+    assert_eq!(spec.shader_cache.as_deref(), Some(dir.as_path()));
+    assert_eq!(
+        spec.env["DXVK_STATE_CACHE_PATH"],
+        dir.join("DXVK_state_cache").into_os_string()
+    );
+    // The profile's own variable wins.
+    assert_eq!(spec.env["MESA_SHADER_CACHE_DIR"], OsString::from("/mine"));
+
+    // Off, or unset, sets nothing.
+    for shader_cache in [Some(crate::model::ShaderCache::Off), None] {
+        let profile = Profile {
+            shader_cache,
+            ..Profile::new("p", Runner::Native)
+        };
+        let spec = prepare(Target::Game(&game), &profile, &tag(), &fx.ctx(&[])).unwrap();
+        assert!(spec.shader_cache.is_none());
+        assert!(!spec.env.contains_key("DXVK_STATE_CACHE_PATH"));
+    }
+}

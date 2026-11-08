@@ -11,7 +11,7 @@ use std::{
 };
 
 use crate::{
-    model::{Game, Profile, Runner},
+    model::{Game, Profile, Runner, ShaderCache},
     paths,
     runner::{self, RunnerCommand},
 };
@@ -89,6 +89,9 @@ pub struct LaunchSpec {
     pub cwd: PathBuf,
     /// Runner binary, for version reporting (`None` for native).
     pub runner: Option<PathBuf>,
+    /// The game's shader cache directory, which `env` points the drivers
+    /// at; create it with [`ShaderCache::create_dirs`] before spawning.
+    pub shader_cache: Option<PathBuf>,
 }
 
 impl LaunchSpec {
@@ -226,6 +229,17 @@ pub fn prepare(
     let mut argv: Vec<OsString> = Vec::new();
     let runner_bin = runner_program.clone();
     let mut runner_env = runner_env;
+    // Under the profile's and the game's env, so a variable set there wins.
+    let shader_cache = match (target, &profile.shader_cache) {
+        (Target::Game(game), Some(ShaderCache::Dir(dir))) => {
+            let dir = paths::expand_tilde(dir, home).join(&game.name);
+            for (key, value) in ShaderCache::env(&dir) {
+                runner_env.insert(key.to_owned(), value.into_os_string());
+            }
+            Some(dir)
+        }
+        _ => None,
+    };
     match (runner_program, tricks) {
         (Some(program), true) if profile.runner == Runner::Wine => {
             runner_env.insert("WINE".into(), program.into_os_string());
@@ -268,6 +282,7 @@ pub fn prepare(
         env,
         cwd,
         runner: runner_bin,
+        shader_cache,
     })
 }
 
