@@ -3,7 +3,7 @@
 # Saving a profile from the TUI rewrites this file, which drops comments.
 
 name = "default"
-runner = "wine"                                 # wine | umu | native
+runner = "wine"                                   # wine | umu | native
 prefix = "~/.local/share/lootrs/prefixes/default"
 # runner_args = []                              # between the runner binary and the exe
 # wrappers = ["mangohud", "gamemoderun"]        # prepended to the whole command
