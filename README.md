@@ -34,7 +34,7 @@ The schema also has `runner = "proton"` (Steam's Proton, with `[proton].build` a
 ## Usage
 
 ```sh
-# start TUI
+# start TUI (needs the `tui` feature: cargo install lootrs --features tui)
 lootrs
 # or use as cli
 lootrs run <game> [--wait] [-- args...]

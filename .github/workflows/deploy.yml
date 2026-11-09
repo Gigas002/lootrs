@@ -44,7 +44,7 @@ jobs:
           key: deploy-${{ matrix.package }}
 
       - name: Build release binary
-        run: cargo build -p ${{ matrix.package }} --release
+        run: cargo build -p ${{ matrix.package }} --release --features tui
 
       - name: Strip and package
         run: |

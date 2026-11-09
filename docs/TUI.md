@@ -1,6 +1,6 @@
 # TUI
 
-Run `lootrs` without a subcommand. Two tabs, games and profiles; `?` lists every key.
+The TUI is behind the non-default `tui` Cargo feature (`cargo build --features tui`); release binaries include it. Run `lootrs` without a subcommand. Two tabs, games and profiles; `?` lists every key.
 
 - Games: `⏎` run, `D` run with debug logging, `s` stop, `l` log pane, `L` open the log in `$PAGER`.
 - Profiles: `i` create/update the prefix, `t` winetricks, `x` execute a program.

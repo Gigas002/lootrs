@@ -17,8 +17,8 @@ name = "lootrs"
 path = "src/main.rs"
 
 [features]
-default = ["tui", "wine", "umu"]
-# Interactive terminal UI; without it lootrs is CLI-only.
+default = ["wine", "umu"]
+# Interactive terminal UI (opt-in); without it lootrs is CLI-only.
 tui = ["dep:ratatui"]
 wine = ["liblootrs/wine"]
 umu = ["liblootrs/umu"]
