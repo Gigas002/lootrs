@@ -12,11 +12,11 @@
 //!   effect without re-linking.
 
 use std::{
-    collections::{BTreeMap, hash_map::DefaultHasher},
+    collections::BTreeMap,
     ffi::OsString,
     fs::File,
-    hash::{Hash, Hasher},
     io,
+    os::unix::ffi::OsStrExt,
     path::{Path, PathBuf},
     process::{Command, Output, Stdio},
 };
@@ -510,14 +510,25 @@ fn write_state(prefix: &Path, state: &PrefixState) -> Result<(), PrefixError> {
 
 /// Exclusive lock per prefix, held until the returned file is dropped.
 fn lock(lock_dir: &Path, prefix: &Path) -> Result<File, PrefixError> {
-    let mut hasher = DefaultHasher::new();
-    prefix.hash(&mut hasher);
-    let path = lock_dir.join(format!("prefix-{:016x}.lock", hasher.finish()));
-    let context = || format!("locking {}", path.display());
+    let name = lock_name(prefix);
+    crate::process::lock(lock_dir, &name).map_err(io_err(format!(
+        "locking {}",
+        lock_dir.join(format!("{name}.lock")).display()
+    )))
+}
 
-    std::fs::create_dir_all(lock_dir).map_err(io_err(context()))?;
-    let file = File::create(&path).map_err(io_err(context()))?;
-    rustix::fs::flock(&file, rustix::fs::FlockOperation::LockExclusive)
-        .map_err(|err| io_err(context())(err.into()))?;
-    Ok(file)
+/// `prefix-<hash>`, the same for every build of lootrs: `DefaultHasher`
+/// may change between Rust releases, and two lootrs builds must agree on
+/// the lock of a prefix. `a/b/` and `a/./b` are the same prefix as `a/b`.
+fn lock_name(prefix: &Path) -> String {
+    let normalized: PathBuf = prefix.components().collect();
+    // FNV-1a, 64 bit.
+    let hash = normalized
+        .as_os_str()
+        .as_bytes()
+        .iter()
+        .fold(0xcbf2_9ce4_8422_2325_u64, |hash, &byte| {
+            (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
+        });
+    format!("prefix-{hash:016x}")
 }

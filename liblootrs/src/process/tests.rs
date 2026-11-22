@@ -225,3 +225,28 @@ fn prefix_in_use_ignores_infrastructure() {
     assert!(!prefix_in_use(&processes, Path::new("/p")));
     assert!(prefix_in_use(&processes, Path::new("/q")));
 }
+
+#[test]
+fn lock_is_private_and_exclusive() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let held = lock(dir.path(), "x").unwrap();
+    let path = dir.path().join("x.lock");
+    assert_eq!(
+        std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    let other = std::fs::File::open(&path).unwrap();
+    assert!(
+        rustix::fs::flock(&other, rustix::fs::FlockOperation::NonBlockingLockExclusive).is_err()
+    );
+    drop(held);
+    // Retried: a test forking in parallel holds a copy of the descriptor
+    // until its child execs (the file is close-on-exec).
+    let deadline = Instant::now() + Duration::from_secs(1);
+    while rustix::fs::flock(&other, rustix::fs::FlockOperation::NonBlockingLockExclusive).is_err() {
+        assert!(Instant::now() < deadline, "the lock was not released");
+        thread::sleep(Duration::from_millis(10));
+    }
+}

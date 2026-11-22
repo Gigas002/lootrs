@@ -311,3 +311,12 @@ fn failed_createprefix_is_reported() {
         "{err:?}"
     );
 }
+
+#[test]
+fn lock_names_are_stable_and_normalized() {
+    // Fixed values: every lootrs build must name a prefix's lock the same.
+    assert_eq!(lock_name(Path::new("/p")), "prefix-07d65607b49cbc4a");
+    assert_eq!(lock_name(Path::new("/p/")), lock_name(Path::new("/p")));
+    assert_eq!(lock_name(Path::new("/a/./b")), lock_name(Path::new("/a/b")));
+    assert_ne!(lock_name(Path::new("/a")), lock_name(Path::new("/b")));
+}
