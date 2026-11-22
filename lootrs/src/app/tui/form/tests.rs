@@ -1,7 +1,8 @@
 use std::collections::BTreeMap;
 
 use liblootrs::model::{
-    Anticheat, Game, Profile, ProtonSection, Runner, SteamIntegration, UmuSection, WineSection,
+    Anticheat, Game, Profile, ProtonSection, Runner, SlrSection, SteamIntegration, UmuSection,
+    WineSection,
 };
 
 use super::*;
@@ -264,12 +265,17 @@ fn map_editor_requires_key_value() {
 }
 
 #[test]
-fn proton_fields_survive_an_edit() {
+fn fields_without_form_fields_survive_an_edit() {
     let profile = Profile {
         proton: Some(ProtonSection {
             build: Some("experimental".into()),
         }),
         steam: Some(SteamIntegration::Host),
+        slr: Some(SlrSection {
+            runtime: "sniper".into(),
+            filesystems_rw: vec!["/mnt/games".into()],
+            filesystems_ro: Vec::new(),
+        }),
         ..Profile::new("n", Runner::Native)
     };
     let form = Form::profile(Some(&profile), Path::new("/root"));

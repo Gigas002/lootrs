@@ -110,7 +110,7 @@ fn duplicate_game_names_are_errors() {
     let catalog = Catalog {
         games: vec![game("wow", "native"), game("wow", "native")],
         profiles: vec![Profile::new("native", Runner::Native)],
-        load_errors: Vec::new(),
+        ..Catalog::default()
     };
 
     let issues = catalog.validate(&ctx(dir.path()));
@@ -128,7 +128,7 @@ fn validate_single_game_includes_its_profile() {
     let catalog = Catalog {
         games: vec![game("wow", "proton")],
         profiles: vec![Profile::new("proton", Runner::Umu)],
-        load_errors: Vec::new(),
+        ..Catalog::default()
     };
     let ctx = ctx(dir.path());
 

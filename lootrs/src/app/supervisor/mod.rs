@@ -22,7 +22,7 @@ use chrono::{DateTime, Local};
 use liblootrs::{
     diag::{self, SystemInfo},
     launch::{self, LaunchContext, LaunchSpec, Tag, Target},
-    model::{Issue, Profile, Runner, Severity, ShaderCache},
+    model::{self, Issue, Profile, Runner, Severity, ShaderCache},
     prefix::{self, EnsureContext, PrefixError},
     process::{self, Owner},
     runlog::{self, RunKind, RunLog},
@@ -244,7 +244,7 @@ fn supervise(
             (
                 Target::Execute { program },
                 Some(found),
-                found.validate(&ctx),
+                model::validate_profile(found, &ctx),
                 RunKind::Execute(profile),
             )
         }
@@ -255,7 +255,7 @@ fn supervise(
             (
                 Target::Tricks { verbs },
                 Some(found),
-                found.validate(&ctx),
+                model::validate_profile(found, &ctx),
                 RunKind::Tricks(profile),
             )
         }
@@ -330,7 +330,7 @@ fn supervise(
     };
 
     if let Some(dir) = &spec.shader_cache
-        && let Err(err) = ShaderCache::create_dirs(dir)
+        && let Err(err) = ShaderCache::create_dirs(dir, profile.runner)
     {
         // The drivers fall back to their defaults; not worth failing for.
         let _ = write_log(
@@ -621,7 +621,10 @@ pub fn init(settings: &Settings, name: &str, out: &mut impl Write) -> Result<(),
     let profile = catalog
         .profile(name)
         .ok_or_else(|| AppError::UnknownProfile(name.to_owned()))?;
-    check_issues(&profile.validate(&validation_context(settings)))?;
+    check_issues(&model::validate_profile(
+        profile,
+        &validation_context(settings),
+    ))?;
     if profile.runner == Runner::Native {
         return Err(AppError::Invalid(format!(
             "profile `{name}` uses runner `native`, which has no prefix"
