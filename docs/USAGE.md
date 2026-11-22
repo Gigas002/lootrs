@@ -8,6 +8,10 @@ Exit codes: `0` ok, `1` runtime failure, `2` invalid input or configuration, `3`
 
 `--json` prints machine-readable output: `list` has every game field plus `runner` and `running`, `profiles` has each profile file's settings plus the `games` using it, and `status` lists `{name, kind, pids, commands}` for each running game (`kind = "game"`) or `execute`/`tricks`/`init` session (`kind = "session"`).
 
+## What belongs to a game
+
+lootrs puts `LOOTRS_GAME=<game>` (`LOOTRS_SESSION` for `execute`, `tricks` and `init`) into the environment of what it starts, and every child inherits it, so wine's and Proton's helpers are found through `/proc` without any state file. Anything else a game starts inherits it too: a browser opened by a launcher counts as part of the game, shows up in `status`, and is stopped by `stop`.
+
 ## Wrappers: MangoHud, GameMode and friends
 
 `wrappers` in a profile go in front of the whole command, for wine, umu and native alike. Wrapping `umu-run` is the same as Steam's `mangohud %command%`. Each entry is split on whitespace.
@@ -37,4 +41,4 @@ env = { MANGOHUD = "1", MANGOHUD_CONFIGFILE = "/home/me/.config/MangoHud/wow.con
 
 Each run log starts with the command line, the environment lootrs set, runner and Proton versions, prefix setup and system details (kernel, distro, ntsync, Vulkan drivers), then the timestamped output and the exit status. The last `log_keep` (default 10) are kept per game or profile. `lootrs logs <game>` prints the latest one.
 
-Values are not redacted: if you put tokens in a profile's `env`, they end up in the log, so check before sharing one. lootrs doesn't set `UMU_LOG=debug` for `--debug`, because umu then dumps your whole environment into the output.
+Values are not redacted: if you put tokens in a profile's `env`, they end up in the log, so check before sharing one. Run logs are readable only by you (`0600`). lootrs doesn't set `UMU_LOG=debug` for `--debug`, because umu then dumps your whole environment into the output.

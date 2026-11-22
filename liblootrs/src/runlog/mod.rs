@@ -8,9 +8,11 @@
 //! ```
 
 use std::{
-    fs::File,
+    fs::{DirBuilder, File, OpenOptions},
     io,
+    os::unix::fs::{DirBuilderExt, OpenOptionsExt},
     path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
 };
 
 #[cfg(test)]
@@ -48,21 +50,38 @@ pub struct RunLog {
     pub artifacts: PathBuf,
 }
 
-/// Creates `<stamp>.log` (adding `-2`, `-3`, ... on collisions), keeping at most
-/// `keep` logs including the new one, and points `latest.log` at it.
+/// Creates `<stamp>.log` (adding `-2`, `-3`, ... on collisions), keeping at
+/// most `keep` logs including the new one, and points `latest.log` at it.
+///
+/// The log is `0600` and its artifacts directory `0700`: the log holds the
+/// environment lootrs set, tokens included.
 pub fn create(logs_dir: &Path, kind: RunKind, stamp: &str, keep: usize) -> io::Result<RunLog> {
     let dir = kind.dir(logs_dir);
     std::fs::create_dir_all(&dir)?;
     prune(&dir, keep.saturating_sub(1))?;
 
-    let (file, path, stem) = (1..)
+    // After the newest log of this second, never in a gap left by pruning:
+    // a reused name would look older than it is.
+    let first = logs(&dir)?
+        .iter()
+        .map(|log| age(log))
+        .filter(|(log_stamp, _)| *log_stamp == stamp)
+        .map(|(_, n)| n.saturating_add(1))
+        .max()
+        .unwrap_or(1);
+    let (file, path, stem) = (first..)
         .map(|n| match n {
             1 => stamp.to_owned(),
             n => format!("{stamp}-{n}"),
         })
         .find_map(|stem| {
             let path = dir.join(format!("{stem}.log"));
-            match File::create_new(&path) {
+            match OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&path)
+            {
                 Ok(file) => Some(Ok((file, path, stem))),
                 Err(err) if err.kind() == io::ErrorKind::AlreadyExists => None,
                 Err(err) => Some(Err(err)),
@@ -71,7 +90,10 @@ pub fn create(logs_dir: &Path, kind: RunKind, stamp: &str, keep: usize) -> io::R
         .expect("unbounded range")?;
 
     let artifacts = dir.join(&stem);
-    std::fs::create_dir_all(&artifacts)?;
+    DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(&artifacts)?;
     link_latest(&dir, &path)?;
 
     Ok(RunLog {
@@ -119,16 +141,7 @@ pub fn remove_if_empty(dir: &Path) {
 
 /// Deletes the oldest logs (and their artifacts) until at most `keep` remain.
 fn prune(dir: &Path, keep: usize) -> io::Result<()> {
-    let mut logs: Vec<PathBuf> = std::fs::read_dir(dir)?
-        .filter_map(|entry| Some(entry.ok()?.path()))
-        .filter(|path| {
-            path.extension().is_some_and(|ext| ext == "log")
-                && path.file_name().is_some_and(|name| name != LATEST)
-                && !path.is_symlink()
-        })
-        .collect();
-    // Stamps sort chronologically.
-    logs.sort();
+    let logs = logs(dir)?;
 
     let excess = logs.len().saturating_sub(keep);
     for log in &logs[..excess] {
@@ -141,11 +154,52 @@ fn prune(dir: &Path, keep: usize) -> io::Result<()> {
     Ok(())
 }
 
+/// The run logs in `dir`, oldest first.
+fn logs(dir: &Path) -> io::Result<Vec<PathBuf>> {
+    let mut logs: Vec<PathBuf> = std::fs::read_dir(dir)?
+        .filter_map(|entry| Some(entry.ok()?.path()))
+        .filter(|path| {
+            path.extension().is_some_and(|ext| ext == "log")
+                && path.file_name().is_some_and(|name| name != LATEST)
+                && !path.is_symlink()
+        })
+        .collect();
+    logs.sort_by(|a, b| age(a).cmp(&age(b)));
+    Ok(logs)
+}
+
+/// Sort key for a run log, oldest first: its stamp, then the `-2`, `-3`, ...
+/// a run started in the same second gets. Stamps (`YYYYMMDD-HHMMSS`) sort
+/// chronologically as text; by name alone, `<stamp>-2.log` would sort before
+/// `<stamp>.log` and `-10` before `-2`.
+fn age(log: &Path) -> (&str, u32) {
+    let stem = log
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or_default();
+    match stem.rsplit_once('-') {
+        Some((stamp, n)) if stamp.contains('-') => match n.parse() {
+            Ok(n) => (stamp, n),
+            Err(_) => (stem, 1),
+        },
+        _ => (stem, 1),
+    }
+}
+
 /// Atomically repoints `latest.log` (relative link) at `target`.
 fn link_latest(dir: &Path, target: &Path) -> io::Result<()> {
+    // Unique per process and call: runs starting at the same time (two
+    // `execute` sessions of one profile) must not remove each other's link.
+    static LINKS: AtomicU64 = AtomicU64::new(0);
     let name = target.file_name().expect("log file has a name");
-    let tmp = dir.join(".latest.log.tmp");
+    let tmp = dir.join(format!(
+        ".latest.log.{}.{}.tmp",
+        std::process::id(),
+        LINKS.fetch_add(1, Ordering::Relaxed)
+    ));
     let _ = std::fs::remove_file(&tmp);
     std::os::unix::fs::symlink(name, &tmp)?;
-    std::fs::rename(&tmp, dir.join(LATEST))
+    std::fs::rename(&tmp, dir.join(LATEST)).inspect_err(|_| {
+        let _ = std::fs::remove_file(&tmp);
+    })
 }

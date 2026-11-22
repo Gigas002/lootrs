@@ -130,7 +130,7 @@ fn header_sections() {
         &profile,
         Some(&spec),
         None,
-        Local::now(),
+        &ZonedDateTime::now(),
     );
 
     assert!(header.starts_with(&format!(
@@ -147,4 +147,18 @@ fn header_sections() {
         assert!(header.contains(section), "missing {section:?} in\n{header}");
     }
     assert!(header.ends_with("=== output ===\n"));
+}
+
+#[test]
+fn time_formats() {
+    let at: ZonedDateTime = "2026-11-22T09:05:07.25+03:00[Europe/Moscow]"
+        .parse()
+        .unwrap();
+
+    assert_eq!(time(STAMP, &at), "20261122-090507");
+    assert_eq!(time("%H:%M:%S%.3f", &at), "09:05:07.250");
+    assert_eq!(
+        time("%Y-%m-%dT%H:%M:%S%:z", &at),
+        "2026-11-22T09:05:07+03:00"
+    );
 }

@@ -124,3 +124,62 @@ fn tail_of_a_big_file_drops_the_cut_line() {
     assert!(lines.iter().all(|l| l.ends_with(&line)));
     assert!(lines.last().unwrap().starts_with("399 "));
 }
+
+#[test]
+fn concurrent_creates_all_succeed() {
+    let logs = tempfile::tempdir().unwrap();
+    let kind = RunKind::Execute("p");
+    let runs: Vec<_> = (0..16)
+        .map(|_| {
+            let logs = logs.path().to_path_buf();
+            std::thread::spawn(move || {
+                create(&logs, kind, "20261027-211403", 100).map(|run| run.path)
+            })
+        })
+        .collect();
+    let mut paths: Vec<PathBuf> = runs
+        .into_iter()
+        .map(|run| run.join().unwrap().unwrap())
+        .collect();
+    paths.sort();
+    paths.dedup();
+
+    assert_eq!(paths.len(), 16);
+    assert!(paths.contains(&latest(logs.path(), kind).unwrap()));
+}
+
+#[test]
+fn retention_orders_same_second_runs_by_their_suffix() {
+    let logs = tempfile::tempdir().unwrap();
+    let kind = RunKind::Game("wow");
+    let stamp = "20261027-211403";
+    let paths: Vec<PathBuf> = (0..11)
+        .map(|_| create(logs.path(), kind, stamp, 3).unwrap().path)
+        .collect();
+
+    assert_eq!(
+        names(&kind.dir(logs.path())),
+        [
+            "20261027-211403-10",
+            "20261027-211403-10.log",
+            "20261027-211403-11",
+            "20261027-211403-11.log",
+            "20261027-211403-9",
+            "20261027-211403-9.log",
+            "latest.log",
+        ]
+    );
+    assert_eq!(latest(logs.path(), kind).as_ref(), paths.last());
+}
+
+#[test]
+fn logs_and_artifacts_are_private() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let logs = tempfile::tempdir().unwrap();
+    let run = create(logs.path(), RunKind::Game("wow"), "20261027-211403", 10).unwrap();
+    let mode = |path: &Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+
+    assert_eq!(mode(&run.path), 0o600);
+    assert_eq!(mode(&run.artifacts), 0o700);
+}

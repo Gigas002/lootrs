@@ -46,6 +46,9 @@ pub enum AppError {
     #[error("failed to write the run log: {0}")]
     RunLog(io::Error),
 
+    #[error("failed to take the launch lock: {0}")]
+    Lock(io::Error),
+
     #[error("failed to start the supervisor: {0}")]
     Detach(io::Error),
 
@@ -85,6 +88,7 @@ impl AppError {
             Self::Spawn { .. }
             | Self::RunLog(_)
             | Self::Detach(_)
+            | Self::Lock(_)
             | Self::NoLogs(_)
             | Self::Cancelled
             | Self::Output(_) => 1,

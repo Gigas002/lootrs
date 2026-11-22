@@ -8,7 +8,9 @@
 use std::{
     collections::BTreeMap,
     fmt,
-    os::unix::fs::MetadataExt,
+    fs::{File, OpenOptions},
+    io,
+    os::unix::fs::{MetadataExt, OpenOptionsExt},
     path::{Path, PathBuf},
     thread,
     time::{Duration, Instant},
@@ -108,6 +110,20 @@ pub struct Outcome {
     pub signaled: usize,
     /// Processes still alive after the timeout and sent SIGKILL.
     pub killed: usize,
+}
+
+/// Takes an exclusive lock on `<dir>/<name>.lock` (`0600`), waiting while
+/// another process holds it. The lock is released when the file is dropped.
+pub fn lock(dir: &Path, name: &str) -> io::Result<File> {
+    std::fs::create_dir_all(dir)?;
+    let file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .mode(0o600)
+        .open(dir.join(format!("{name}.lock")))?;
+    rustix::fs::flock(&file, rustix::fs::FlockOperation::LockExclusive)?;
+    Ok(file)
 }
 
 /// Processes of the current user, excluding this one.

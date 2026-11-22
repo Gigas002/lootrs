@@ -3,7 +3,6 @@ name = "lootrs"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-homepage.workspace = true
 description.workspace = true
 keywords.workspace = true
 repository.workspace = true
@@ -25,8 +24,8 @@ umu = ["liblootrs/umu"]
 
 [dependencies]
 liblootrs = { path = "../liblootrs", version = "0.1.0", default-features = false }
-chrono.workspace = true
 clap.workspace = true
+jiff.workspace = true
 ratatui = { workspace = true, optional = true }
 rustix.workspace = true
 serde.workspace = true

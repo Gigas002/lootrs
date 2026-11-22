@@ -238,3 +238,69 @@ fn load_issue_message_omits_the_path() {
         "`name = \"other\"` must match the file name `renamed`"
     );
 }
+
+#[test]
+fn unknown_games_keys_are_warnings() {
+    let dir = tempfile::tempdir().unwrap();
+    write(
+        dir.path(),
+        "games.toml",
+        "gmae = 1\n[[game]]\nname = \"wow\"\nexe = \"/g.exe\"\nprofile = \"p\"\nargz = [\"-x\"]\nenv = { ANY = \"1\" }\n",
+    );
+    write(
+        dir.path(),
+        "profiles/p.toml",
+        "name = \"p\"\nrunner = \"native\"\nfoo = 1\n",
+    );
+
+    let catalog = Catalog::load(dir.path());
+    let messages: Vec<String> = catalog
+        .load_warnings
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+
+    assert_eq!(catalog.games.len(), 1);
+    assert_eq!(messages.len(), 3, "{messages:?}");
+    assert!(
+        messages.iter().any(|m| m.contains("`gmae`")),
+        "{messages:?}"
+    );
+    let game: Vec<Issue> = catalog.validate_game("wow", &ctx(dir.path())).unwrap();
+    let game: Vec<&str> = game.iter().map(|issue| issue.message.as_str()).collect();
+    assert!(game.contains(&"unknown key `argz` is ignored"), "{game:?}");
+    assert!(game.contains(&"unknown key `foo` is ignored"), "{game:?}");
+}
+
+#[test]
+fn game_keys_are_the_game_fields() {
+    let game = Game {
+        cwd: Some("/games".into()),
+        game_id: Some("umu-1".into()),
+        ..game("wow", "p")
+    };
+    let table = toml::Table::try_from(&game).unwrap();
+    let mut keys: Vec<&str> = table.keys().map(String::as_str).collect();
+    let mut known = GAME_KEYS.to_vec();
+    keys.sort_unstable();
+    known.sort_unstable();
+
+    assert_eq!(keys, known);
+}
+
+#[test]
+fn validate_single_game_reports_a_duplicate_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let catalog = Catalog {
+        games: vec![game("wow", "p"), game("wow", "q")],
+        ..Catalog::default()
+    };
+
+    let issues = catalog.validate_game("wow", &ctx(dir.path())).unwrap();
+
+    assert!(
+        issues
+            .iter()
+            .any(|issue| issue.message == "duplicate game name")
+    );
+}

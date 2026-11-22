@@ -311,3 +311,44 @@ fn failed_createprefix_is_reported() {
         "{err:?}"
     );
 }
+
+#[test]
+fn lock_names_are_stable_and_normalized() {
+    // Fixed values: every lootrs build must name a prefix's lock the same.
+    assert_eq!(lock_name(Path::new("/p")), "prefix-07d65607b49cbc4a");
+    assert_eq!(lock_name(Path::new("/p/")), lock_name(Path::new("/p")));
+    assert_eq!(lock_name(Path::new("/a/./b")), lock_name(Path::new("/a/b")));
+    assert_ne!(lock_name(Path::new("/a")), lock_name(Path::new("/b")));
+}
+
+#[test]
+fn state_links_outside_the_dll_dirs_are_ignored() {
+    let fx = Fixture::new();
+    fx.write("outside/real.txt", "precious");
+    std::os::unix::fs::symlink("real.txt", fx.path("outside/victim")).unwrap();
+    fx.write("outside/victim.orig", "backup");
+    fx.write(&format!("{SYS32}/evil"), "not a dll");
+    fx.write(&format!("{SYS32}/evil.orig"), "backup");
+    // A state file planted in the prefix (it is writable by what runs there).
+    fx.write(
+        &format!("pfx/{STATE_FILE}"),
+        r#"[dxvk]
+source = "/x"
+links = [
+    "../outside/victim",
+    "/abs/victim",
+    "drive_c/windows/system32/../../../../outside/victim",
+    "drive_c/windows/system32/evil",
+]
+"#,
+    );
+
+    let report = fx.ensure(None, None, false).unwrap();
+
+    assert_eq!(report.changes.len(), 1, "{:?}", report.changes);
+    assert!(fx.path("outside/victim").is_symlink());
+    assert_eq!(fx.read("outside/victim"), "precious");
+    assert_eq!(fx.read("outside/victim.orig"), "backup");
+    assert_eq!(fx.read(&format!("{SYS32}/evil")), "not a dll");
+    assert_eq!(fx.read(&format!("{SYS32}/evil.orig")), "backup");
+}

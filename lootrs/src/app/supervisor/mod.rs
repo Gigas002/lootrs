@@ -18,7 +18,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use chrono::{DateTime, Local};
+use jiff::{ZonedDateTime, fmt::strtime};
 use liblootrs::{
     diag::{self, SystemInfo},
     launch::{self, LaunchContext, LaunchSpec, Tag, Target},
@@ -262,14 +262,24 @@ fn supervise(
     };
     check_issues(&issues)?;
     let profile = profile.expect("validation reports a missing profile");
+    // Held until the game's first process exists (it carries the tag from
+    // its exec on), so two launches at once can't both pass this check.
+    let launching = match request {
+        Request::Game { name } => Some(
+            process::lock(&settings.dirs.runtime, &format!("game-{name}"))
+                .map_err(AppError::Lock)?,
+        ),
+        Request::Execute { .. } | Request::Tricks { .. } => None,
+    };
     if let Request::Game { name } = request
         && process::is_running(&process::scan(), &Owner::Game(name.to_owned()))
     {
         return Err(AppError::AlreadyRunning(name.to_owned()));
     }
 
-    let started_at = Local::now();
-    let stamp = started_at.format("%Y%m%d-%H%M%S").to_string();
+    let started_at = ZonedDateTime::now();
+    let clock = Instant::now();
+    let stamp = time(STAMP, &started_at);
     let RunLog {
         file,
         path: log_path,
@@ -315,7 +325,7 @@ fn supervise(
         profile,
         prepared.as_ref().ok(),
         prefix.as_ref(),
-        started_at,
+        &started_at,
     );
     write_log(&log, &header).map_err(AppError::RunLog)?;
 
@@ -350,6 +360,7 @@ fn supervise(
             });
         }
     };
+    drop(launching);
     let started = Started {
         pid: child.id(),
         log: log_path,
@@ -367,8 +378,7 @@ fn supervise(
         }
     }
 
-    let elapsed = Local::now() - started_at;
-    let footer = footer(status, elapsed.to_std().unwrap_or_default());
+    let footer = footer(status, clock.elapsed());
     tracing::info!(
         "{} {}",
         describe(request),
@@ -378,6 +388,14 @@ fn supervise(
     runlog::remove_if_empty(&artifacts);
 
     Ok(exit_code(status))
+}
+
+/// Run-log names: `YYYYMMDD-HHMMSS`, which sorts chronologically.
+const STAMP: &str = "%Y%m%d-%H%M%S";
+
+/// `at` in a fixed strftime `format` (all of lootrs's are valid).
+fn time(format: &str, at: &ZonedDateTime) -> String {
+    strtime::format(format, at).unwrap_or_default()
 }
 
 /// Logs warnings; fails on errors.
@@ -429,7 +447,7 @@ fn pump_output(child: &mut Child, log: &Arc<Mutex<File>>, tee: bool) -> mpsc::Re
             while reader.read_until(b'\n', &mut line).unwrap_or(0) > 0 {
                 let text = String::from_utf8_lossy(&line);
                 let text = text.trim_end_matches(['\n', '\r']);
-                let stamp = Local::now().format("%H:%M:%S%.3f");
+                let stamp = time("%H:%M:%S%.3f", &ZonedDateTime::now());
                 let _ = write_log(&log, &format!("[{stamp}] [{label}] {text}\n"));
                 if tee {
                     stream.echo(text);
@@ -521,11 +539,11 @@ fn title(request: Request) -> String {
     }
 }
 
-fn first_line(title: &str, started_at: DateTime<Local>) -> String {
+fn first_line(title: &str, started_at: &ZonedDateTime) -> String {
     format!(
         "=== lootrs {} — {title} — {} ===\n",
         env!("CARGO_PKG_VERSION"),
-        started_at.to_rfc3339_opts(chrono::SecondsFormat::Secs, false),
+        time("%Y-%m-%dT%H:%M:%S%:z", started_at),
     )
 }
 
@@ -536,7 +554,7 @@ pub fn header(
     profile: &Profile,
     spec: Option<&LaunchSpec>,
     prefix: Option<&prefix::Report>,
-    started_at: DateTime<Local>,
+    started_at: &ZonedDateTime,
 ) -> String {
     let mut out = first_line(&title(request), started_at);
 
@@ -631,8 +649,8 @@ pub fn init(settings: &Settings, name: &str, out: &mut impl Write) -> Result<(),
         )));
     }
 
-    let started_at = Local::now();
-    let stamp = started_at.format("%Y%m%d-%H%M%S").to_string();
+    let started_at = ZonedDateTime::now();
+    let stamp = time(STAMP, &started_at);
     let RunLog {
         mut file,
         artifacts,
@@ -646,7 +664,7 @@ pub fn init(settings: &Settings, name: &str, out: &mut impl Write) -> Result<(),
     .map_err(AppError::RunLog)?;
     runlog::remove_if_empty(&artifacts);
 
-    let mut log = first_line(&format!("init {name}"), started_at);
+    let mut log = first_line(&format!("init {name}"), &started_at);
     log += &format!(
         "--- profile ---\n{}",
         toml::to_string(profile).unwrap_or_default()
