@@ -262,6 +262,15 @@ fn supervise(
     };
     check_issues(&issues)?;
     let profile = profile.expect("validation reports a missing profile");
+    // Held until the game's first process exists (it carries the tag from
+    // its exec on), so two launches at once can't both pass this check.
+    let launching = match request {
+        Request::Game { name } => Some(
+            process::lock(&settings.dirs.runtime, &format!("game-{name}"))
+                .map_err(AppError::Lock)?,
+        ),
+        Request::Execute { .. } | Request::Tricks { .. } => None,
+    };
     if let Request::Game { name } = request
         && process::is_running(&process::scan(), &Owner::Game(name.to_owned()))
     {
@@ -350,6 +359,7 @@ fn supervise(
             });
         }
     };
+    drop(launching);
     let started = Started {
         pid: child.id(),
         log: log_path,

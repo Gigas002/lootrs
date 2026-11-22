@@ -406,6 +406,27 @@ fn run_status_stop_cycle() {
     }
 }
 
+#[test]
+fn concurrent_runs_start_the_game_once() {
+    let home = tempfile::tempdir().unwrap();
+    let name = format!("race-{}", std::process::id());
+    long_game(home.path(), &name);
+
+    let runs: Vec<_> = (0..4)
+        .map(|_| {
+            let home = home.path().to_path_buf();
+            let name = name.clone();
+            std::thread::spawn(move || lootrs(&home, &["run", &name]).status.code())
+        })
+        .collect();
+    let mut codes: Vec<_> = runs.into_iter().map(|run| run.join().unwrap()).collect();
+    codes.sort();
+    let stop = lootrs(home.path(), &["stop", &name]);
+
+    assert_eq!(codes, [Some(0), Some(4), Some(4), Some(4)]);
+    assert!(stop.status.success(), "{stop:?}");
+}
+
 #[cfg(any(feature = "wine", feature = "umu"))]
 /// Runs lootrs with `<home>/bin` first in `PATH`.
 fn lootrs_with_path(home: &Path, args: &[&str]) -> Output {
