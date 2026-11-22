@@ -437,7 +437,7 @@ fn summarize_groups_by_owner() {
 }
 
 #[test]
-fn proton_profiles_are_not_edited() {
+fn profiles_of_other_tools_are_not_edited() {
     let (dir, _) = fixture();
     let config = dir.path().join("config");
     std::fs::write(
@@ -445,8 +445,13 @@ fn proton_profiles_are_not_edited() {
         "name = \"p\"\nrunner = \"proton\"\n",
     )
     .unwrap();
+    std::fs::write(
+        config.join("profiles/q.toml"),
+        "name = \"q\"\nrunner = \"slr\"\n[slr]\nruntime = \"sniper\"\n",
+    )
+    .unwrap();
     let mut tui = Tui::new(settings(dir.path()));
-    // Profiles sort n, p, w.
+    // Profiles sort n, p, q, w.
     press(&mut tui, &[Key::Char('2'), Key::Down]);
     assert_eq!(tui.selected_profile().unwrap().name, "p");
 
@@ -459,5 +464,14 @@ fn proton_profiles_are_not_edited() {
             "`proton` profiles run through Steam: edit them by hand",
             true
         )
+    );
+
+    press(&mut tui, &[Key::Down]);
+    assert_eq!(tui.selected_profile().unwrap().name, "q");
+    tui.handle_key(Key::Char('e'));
+    assert!(tui.form.is_none());
+    assert_eq!(
+        status(&tui),
+        ("`slr` profiles run through sruman: edit them by hand", true)
     );
 }

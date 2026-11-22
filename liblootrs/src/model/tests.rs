@@ -116,11 +116,24 @@ fn slr_profiles_are_sruman_s() {
     let profile = Profile {
         prefix: Some("/pfx".into()),
         slr: Some(SlrSection::new("sniper")),
-        ..Profile::new("sniper", Runner::Native)
+        ..Profile::new("sniper", Runner::Slr)
     };
     assert_eq!(
         errors(&validate_profile(&profile, &ctx())),
         [SLR_UNSUPPORTED]
+    );
+    assert!(!runner_available(Runner::Slr));
+
+    // `[slr]` on `native` is ignored: the game runs as a plain native one.
+    let native = Profile {
+        runner: Runner::Native,
+        ..profile
+    };
+    let issues = validate_profile(&native, &ctx());
+    assert!(errors(&issues).is_empty(), "{issues:?}");
+    assert!(
+        warnings(&issues).contains(&"`[slr]` is ignored for runner `native`"),
+        "{issues:?}"
     );
 }
 

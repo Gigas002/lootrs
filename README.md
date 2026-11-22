@@ -29,7 +29,7 @@ Run `lootrs check` after editing files: it validates games and profiles and chec
 
 See [`examples/config.toml`](examples/config.toml) for every setting, and [`examples/games.toml`](examples/games.toml) and [`examples/profiles/`](examples/profiles/) for annotated games and profiles. Profiles are named after their file: `profiles/default.toml` is profile `default`.
 
-Profiles use the [libgameprofiles](https://github.com/Gigas002/libgameprofiles) format, shared with [gaki](https://github.com/Gigas002/gaki) and [sruman](https://github.com/Gigas002/sruman), so one profile directory can serve all three. It also has `runner = "proton"` (Steam's Proton, with `[proton].build` and `steam`, launched by gaki) and `native` profiles with an `[slr]` section (a Steam Linux Runtime, launched by sruman). Such profiles load in lootrs but don't launch: `lootrs check` reports them, and the TUI won't edit them. Settings of other runners are kept, and `lootrs check` warns that they are ignored; so are keys the format doesn't know.
+Profiles use the [libgameprofiles](https://github.com/Gigas002/libgameprofiles) format, shared with [gaki](https://github.com/Gigas002/gaki) and [sruman](https://github.com/Gigas002/sruman), so one profile directory can serve all three. It also has `runner = "proton"` (Steam's Proton, with `[proton].build` and `steam`, launched by gaki) and `runner = "slr"` (a Steam Linux Runtime, with `[slr]`, launched by sruman). Such profiles load in lootrs but don't launch: `lootrs check` reports them, and the TUI won't edit them. Settings of other runners are kept, and `lootrs check` warns that they are ignored; so are keys the format doesn't know.
 
 ## Usage
 

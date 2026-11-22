@@ -322,7 +322,7 @@ fn slr_profile_is_refused() {
     let fx = Fixture::new();
     let profile = Profile {
         slr: Some(crate::model::SlrSection::new("sniper")),
-        ..Profile::new("p", Runner::Native)
+        ..Profile::new("p", Runner::Slr)
     };
     let err = prepare(Target::Game(&fx.game()), &profile, &tag(), &fx.ctx(&[])).unwrap_err();
     assert_eq!(err.problems, [crate::model::SLR_UNSUPPORTED]);

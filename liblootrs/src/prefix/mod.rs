@@ -212,6 +212,12 @@ pub fn ensure(
             })
             .map(Some)
         }
+        Runner::Proton => Err(PrefixError::Runner(
+            crate::launch::PROTON_UNSUPPORTED.to_owned(),
+        )),
+        Runner::Slr => Err(PrefixError::Runner(
+            crate::model::SLR_UNSUPPORTED.to_owned(),
+        )),
         #[allow(unreachable_patterns)]
         runner => {
             let _ = (ctx, &in_use);

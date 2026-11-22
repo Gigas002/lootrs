@@ -9,8 +9,8 @@ mod game;
 
 pub use game::Game;
 pub use libgameprofiles::{
-    Anticheat, Issue, Issues, Profile, ProtonSection, Runner, Severity, ShaderCache, SlrSection,
-    SteamIntegration, Subject, UmuSection, WineSection, validate_name,
+    Anticheat, Issue, Issues, LibOverride, Profile, ProtonSection, Runner, Severity, ShaderCache,
+    SlrMode, SlrSection, SteamIntegration, Subject, UmuSection, WineSection, validate_name,
 };
 
 #[cfg(test)]
@@ -28,13 +28,14 @@ pub struct ValidationContext<'a> {
 }
 
 /// Whether this build of lootrs can launch `runner` (Cargo features `wine`
-/// and `umu`). `proton` never is: it runs through Steam.
+/// and `umu`). `proton` and `slr` never are: they run through Steam and
+/// sruman.
 pub fn runner_available(runner: Runner) -> bool {
     match runner {
         Runner::Wine => cfg!(feature = "wine"),
         Runner::Umu => cfg!(feature = "umu"),
         Runner::Native => true,
-        Runner::Proton => false,
+        Runner::Proton | Runner::Slr => false,
     }
 }
 
@@ -49,13 +50,14 @@ pub fn validate_profile(profile: &Profile, ctx: &ValidationContext) -> Vec<Issue
         issues.error(crate::launch::PROTON_UNSUPPORTED);
         return issues.finish();
     }
+    if runner == Runner::Slr {
+        issues.error(SLR_UNSUPPORTED);
+        return issues.finish();
+    }
     if !runner_available(runner) {
         issues.error(format!(
             "runner `{runner}` is not available: lootrs was built without the `{runner}` feature"
         ));
-    }
-    if runner == Runner::Native && profile.slr.is_some() {
-        issues.error(SLR_UNSUPPORTED);
     }
     if runner.is_windows() && profile.prefix.is_none() {
         issues.error(format!("`prefix` is required for runner `{runner}`"));
@@ -82,7 +84,6 @@ pub fn validate_profile(profile: &Profile, ctx: &ValidationContext) -> Vec<Issue
 const PROTON_REQUIRED: &str = "`[umu].proton` is required: an absolute path to a Proton build \
      (without it umu would download Proton)";
 
-/// lootrs runs `native` games directly, so it can't keep what `[slr]` asks
-/// for (a runtime container, a private home).
+/// `slr` profiles need a Steam Linux Runtime, which sruman manages.
 pub(crate) const SLR_UNSUPPORTED: &str =
-    "`[slr]` profiles run in a Steam Linux Runtime: use sruman; lootrs can't launch them";
+    "`slr` profiles run with a Steam Linux Runtime: use sruman; lootrs can't launch them";
