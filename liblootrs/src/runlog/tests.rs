@@ -124,3 +124,26 @@ fn tail_of_a_big_file_drops_the_cut_line() {
     assert!(lines.iter().all(|l| l.ends_with(&line)));
     assert!(lines.last().unwrap().starts_with("399 "));
 }
+
+#[test]
+fn concurrent_creates_all_succeed() {
+    let logs = tempfile::tempdir().unwrap();
+    let kind = RunKind::Execute("p");
+    let runs: Vec<_> = (0..16)
+        .map(|_| {
+            let logs = logs.path().to_path_buf();
+            std::thread::spawn(move || {
+                create(&logs, kind, "20261027-211403", 100).map(|run| run.path)
+            })
+        })
+        .collect();
+    let mut paths: Vec<PathBuf> = runs
+        .into_iter()
+        .map(|run| run.join().unwrap().unwrap())
+        .collect();
+    paths.sort();
+    paths.dedup();
+
+    assert_eq!(paths.len(), 16);
+    assert!(paths.contains(&latest(logs.path(), kind).unwrap()));
+}

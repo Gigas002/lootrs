@@ -11,6 +11,7 @@ use std::{
     fs::File,
     io,
     path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
 };
 
 #[cfg(test)]
@@ -143,9 +144,18 @@ fn prune(dir: &Path, keep: usize) -> io::Result<()> {
 
 /// Atomically repoints `latest.log` (relative link) at `target`.
 fn link_latest(dir: &Path, target: &Path) -> io::Result<()> {
+    // Unique per process and call: runs starting at the same time (two
+    // `execute` sessions of one profile) must not remove each other's link.
+    static LINKS: AtomicU64 = AtomicU64::new(0);
     let name = target.file_name().expect("log file has a name");
-    let tmp = dir.join(".latest.log.tmp");
+    let tmp = dir.join(format!(
+        ".latest.log.{}.{}.tmp",
+        std::process::id(),
+        LINKS.fetch_add(1, Ordering::Relaxed)
+    ));
     let _ = std::fs::remove_file(&tmp);
     std::os::unix::fs::symlink(name, &tmp)?;
-    std::fs::rename(&tmp, dir.join(LATEST))
+    std::fs::rename(&tmp, dir.join(LATEST)).inspect_err(|_| {
+        let _ = std::fs::remove_file(&tmp);
+    })
 }
