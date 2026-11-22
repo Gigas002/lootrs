@@ -171,3 +171,15 @@ fn retention_orders_same_second_runs_by_their_suffix() {
     );
     assert_eq!(latest(logs.path(), kind).as_ref(), paths.last());
 }
+
+#[test]
+fn logs_and_artifacts_are_private() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let logs = tempfile::tempdir().unwrap();
+    let run = create(logs.path(), RunKind::Game("wow"), "20261027-211403", 10).unwrap();
+    let mode = |path: &Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+
+    assert_eq!(mode(&run.path), 0o600);
+    assert_eq!(mode(&run.artifacts), 0o700);
+}

@@ -8,8 +8,9 @@
 //! ```
 
 use std::{
-    fs::File,
+    fs::{DirBuilder, File, OpenOptions},
     io,
+    os::unix::fs::{DirBuilderExt, OpenOptionsExt},
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
 };
@@ -49,8 +50,11 @@ pub struct RunLog {
     pub artifacts: PathBuf,
 }
 
-/// Creates `<stamp>.log` (adding `-2`, `-3`, ... on collisions), keeping at most
-/// `keep` logs including the new one, and points `latest.log` at it.
+/// Creates `<stamp>.log` (adding `-2`, `-3`, ... on collisions), keeping at
+/// most `keep` logs including the new one, and points `latest.log` at it.
+///
+/// The log is `0600` and its artifacts directory `0700`: the log holds the
+/// environment lootrs set, tokens included.
 pub fn create(logs_dir: &Path, kind: RunKind, stamp: &str, keep: usize) -> io::Result<RunLog> {
     let dir = kind.dir(logs_dir);
     std::fs::create_dir_all(&dir)?;
@@ -72,7 +76,12 @@ pub fn create(logs_dir: &Path, kind: RunKind, stamp: &str, keep: usize) -> io::R
         })
         .find_map(|stem| {
             let path = dir.join(format!("{stem}.log"));
-            match File::create_new(&path) {
+            match OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&path)
+            {
                 Ok(file) => Some(Ok((file, path, stem))),
                 Err(err) if err.kind() == io::ErrorKind::AlreadyExists => None,
                 Err(err) => Some(Err(err)),
@@ -81,7 +90,10 @@ pub fn create(logs_dir: &Path, kind: RunKind, stamp: &str, keep: usize) -> io::R
         .expect("unbounded range")?;
 
     let artifacts = dir.join(&stem);
-    std::fs::create_dir_all(&artifacts)?;
+    DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(&artifacts)?;
     link_latest(&dir, &path)?;
 
     Ok(RunLog {
