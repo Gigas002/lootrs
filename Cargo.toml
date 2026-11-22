@@ -5,7 +5,6 @@ resolver = "3"
 [workspace.package]
 edition = "2024"
 license = "GPL-3.0-or-later"
-homepage = "https://github.com/Gigas002/lootrs"
 description = "Minimal TUI and CLI for running Windows games through wine, Proton (umu) or natively"
 keywords = ["wine", "proton", "umu", "tui", "games"]
 repository = "https://github.com/Gigas002/lootrs"
