@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- libgameprofiles comes from crates.io (`0.1`) instead of its git master
+  branch; dependencies updated.
 - The profile model, its validation and profile loading and saving moved to
   the [libgameprofiles](https://github.com/Gigas002/libgameprofiles) crate,
   shared with gaki and sruman. `liblootrs::model` re-exports its types;
