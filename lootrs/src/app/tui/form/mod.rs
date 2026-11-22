@@ -7,8 +7,8 @@ use std::{
 };
 
 use liblootrs::model::{
-    Anticheat, Game, Profile, ProtonSection, Runner, ShaderCache, SteamIntegration, UmuSection,
-    WineSection,
+    Anticheat, Game, Profile, ProtonSection, Runner, ShaderCache, SlrSection, SteamIntegration,
+    UmuSection, WineSection,
 };
 
 use super::Key;
@@ -192,9 +192,17 @@ pub struct Form {
     profile_runners: BTreeMap<String, Runner>,
     /// Default prefix location for new profiles (`<prefix_root>/<name>`).
     prefix_root: PathBuf,
-    /// `[proton]` and `steam` from the edited profile, written back
-    /// unchanged: the form has no fields for them.
-    steam_parts: (Option<ProtonSection>, Option<SteamIntegration>),
+    /// `[proton]`, `steam` and `[slr]` from the edited profile, written
+    /// back unchanged: the form has no fields for them.
+    kept: Kept,
+}
+
+/// The parts of an edited profile the form has no fields for.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct Kept {
+    proton: Option<ProtonSection>,
+    steam: Option<SteamIntegration>,
+    slr: Option<SlrSection>,
 }
 
 fn path_text(path: Option<&Path>) -> String {
@@ -404,7 +412,11 @@ impl Form {
             BTreeMap::new(),
             prefix_root.to_path_buf(),
         );
-        form.steam_parts = profile.map_or_else(Default::default, |p| (p.proton.clone(), p.steam));
+        form.kept = profile.map_or_else(Kept::default, |p| Kept {
+            proton: p.proton.clone(),
+            steam: p.steam,
+            slr: p.slr.clone(),
+        });
         form
     }
 
@@ -427,7 +439,7 @@ impl Form {
             dirty: false,
             profile_runners,
             prefix_root,
-            steam_parts: (None, None),
+            kept: Kept::default(),
         }
     }
 
@@ -626,8 +638,8 @@ impl Form {
             dll_overrides: self.map(FieldKey::DllOverrides),
             wine,
             umu: (umu != UmuSection::default()).then_some(umu),
-            proton: self.steam_parts.0.clone(),
-            steam: self.steam_parts.1,
+            proton: self.kept.proton.clone(),
+            steam: self.kept.steam,
             anticheat: Anticheat {
                 battleye: self.toggle(FieldKey::Battleye),
                 eac: self.toggle(FieldKey::Eac),
@@ -635,6 +647,7 @@ impl Form {
             shader_cache: self
                 .optional(FieldKey::ShaderCache)
                 .map(|text| ShaderCache::parse(&text)),
+            slr: self.kept.slr.clone(),
         }
     }
 }

@@ -68,6 +68,7 @@ fn catalog(exe: &Path) -> Catalog {
             Profile::new("native", Runner::Native),
         ],
         load_errors: Vec::new(),
+        load_warnings: Vec::new(),
     }
 }
 

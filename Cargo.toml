@@ -12,6 +12,8 @@ repository = "https://github.com/Gigas002/lootrs"
 version = "0.1.0"
 
 [workspace.dependencies]
+# Profiles (`profiles/*.toml`): the format lootrs, gaki and sruman share.
+libgameprofiles = { git = "https://github.com/Gigas002/libgameprofiles", branch = "master", version = "0.1.0" }
 chrono = { version = "0.4", default-features = false, features = [
     "clock",
     "std",

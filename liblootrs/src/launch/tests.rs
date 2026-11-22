@@ -318,6 +318,21 @@ fn proton_profile_is_refused() {
 }
 
 #[test]
+fn slr_profile_is_refused() {
+    let fx = Fixture::new();
+    let profile = Profile {
+        slr: Some(crate::model::SlrSection::new("sniper")),
+        ..Profile::new("p", Runner::Native)
+    };
+    let err = prepare(Target::Game(&fx.game()), &profile, &tag(), &fx.ctx(&[])).unwrap_err();
+    assert_eq!(err.problems, [crate::model::SLR_UNSUPPORTED]);
+    assert_eq!(
+        preflight(&profile, &fx.ctx(&[])),
+        [crate::model::SLR_UNSUPPORTED]
+    );
+}
+
+#[test]
 fn shader_cache_goes_under_the_game() {
     let fx = Fixture::new();
     let profile = Profile {
@@ -330,9 +345,11 @@ fn shader_cache_goes_under_the_game() {
     let dir = fx.path("shaders/g");
     assert_eq!(spec.shader_cache.as_deref(), Some(dir.as_path()));
     assert_eq!(
-        spec.env["DXVK_STATE_CACHE_PATH"],
-        dir.join("DXVK_state_cache").into_os_string()
+        spec.env["__GL_SHADER_DISK_CACHE_PATH"],
+        dir.join("nvidiav1").into_os_string()
     );
+    // A native game has no DXVK.
+    assert!(!spec.env.contains_key("DXVK_STATE_CACHE_PATH"));
     // The profile's own variable wins.
     assert_eq!(spec.env["MESA_SHADER_CACHE_DIR"], OsString::from("/mine"));
 

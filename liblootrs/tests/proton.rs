@@ -1,6 +1,7 @@
 //! Profiles for the `proton` runner (Steam's Proton) load and round-trip.
-//! lootrs can't launch them, so validating one gives exactly one error; the
-//! `native` fixture validates cleanly.
+//! lootrs can't launch them, so validating one for lootrs gives exactly one
+//! error (the fixtures are valid files); the `native` fixture validates
+//! cleanly.
 
 use std::path::Path;
 
@@ -24,7 +25,7 @@ fn fixture_profiles_load() {
     for entry in std::fs::read_dir(fixtures()).unwrap() {
         let path = entry.unwrap().path();
         let profile = store::load_profile(&path).unwrap();
-        let issues = profile.validate(&ctx);
+        let issues = liblootrs::model::validate_profile(&profile, &ctx);
         if profile.runner == Runner::Proton {
             assert_eq!(issues.len(), 1, "{issues:#?}");
             assert_eq!(issues[0].severity, Severity::Error);
