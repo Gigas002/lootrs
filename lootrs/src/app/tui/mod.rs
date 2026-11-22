@@ -649,8 +649,20 @@ impl Tui {
             }
             Tab::Profiles => {
                 let profile = name.and_then(|n| self.catalog.profile(n));
-                if profile.is_some_and(|p| p.runner == Runner::Proton) {
-                    self.error("`proton` profiles run through Steam: edit them by hand");
+                // The form offers only lootrs' runners; saving it would
+                // silently change the runner of anything else.
+                if let Some(runner) = profile
+                    .map(|p| p.runner)
+                    .filter(|r| matches!(r, Runner::Proton | Runner::Slr))
+                {
+                    let tool = if runner == Runner::Proton {
+                        "Steam"
+                    } else {
+                        "sruman"
+                    };
+                    self.error(format!(
+                        "`{runner}` profiles run through {tool}: edit them by hand"
+                    ));
                     return;
                 }
                 Form::profile(profile, &self.settings.dirs.prefix_root)

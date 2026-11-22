@@ -34,10 +34,8 @@ pub fn command(
     ctx: &LaunchContext,
 ) -> Result<RunnerCommand, Vec<String>> {
     let command: Result<RunnerCommand, _> = match profile.runner {
-        Runner::Native if profile.slr.is_some() => {
-            return Err(vec![crate::model::SLR_UNSUPPORTED.into()]);
-        }
         Runner::Native => return Ok(native::command()),
+        Runner::Slr => return Err(vec![crate::model::SLR_UNSUPPORTED.into()]),
         Runner::Proton => return Err(vec![crate::launch::PROTON_UNSUPPORTED.into()]),
         #[cfg(feature = "wine")]
         Runner::Wine => wine::command(profile, prefix, debug, ctx),

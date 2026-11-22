@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
 use liblootrs::model::{
-    Anticheat, Game, Profile, ProtonSection, Runner, SlrSection, SteamIntegration, UmuSection,
-    WineSection,
+    Anticheat, Game, LibOverride, Profile, ProtonSection, Runner, SlrMode, SlrSection,
+    SteamIntegration, UmuSection, WineSection,
 };
 
 use super::*;
@@ -272,9 +272,10 @@ fn fields_without_form_fields_survive_an_edit() {
         }),
         steam: Some(SteamIntegration::Host),
         slr: Some(SlrSection {
-            runtime: "sniper".into(),
+            mode: SlrMode::Overlay,
             filesystems_rw: vec!["/mnt/games".into()],
-            filesystems_ro: Vec::new(),
+            lib_overrides: BTreeMap::from([("libSDL2-2.0.so.0".into(), LibOverride::Host)]),
+            ..SlrSection::new("sniper")
         }),
         ..Profile::new("n", Runner::Native)
     };

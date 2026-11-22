@@ -16,8 +16,9 @@ All notable changes to this project will be documented in this file.
 - `lootrs check` warns about unknown keys in profile files, and about
   `[proton]` and `steam` on runners other than `proton` (they were kept
   silently).
-- A `native` profile with an `[slr]` section (sruman's Steam Linux Runtime)
-  is refused instead of launched without its runtime.
+- Profiles with `runner = "slr"` (sruman's Steam Linux Runtime) load but are
+  refused at launch and in `init`, and the TUI won't edit them, like `proton`
+  profiles. An `[slr]` section on any other runner is ignored with a warning.
 - `native` games no longer get DXVK and VKD3D-Proton `shader_cache`
   variables.
 - A `prefix` that is or contains the home directory is an error, as are NUL

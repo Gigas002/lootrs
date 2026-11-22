@@ -132,7 +132,7 @@ pub fn prepare(
             problems: vec![PROTON_UNSUPPORTED.into()],
         });
     }
-    if profile.runner == Runner::Native && profile.slr.is_some() {
+    if profile.runner == Runner::Slr {
         return Err(LaunchError {
             problems: vec![crate::model::SLR_UNSUPPORTED.into()],
         });
@@ -165,7 +165,7 @@ pub fn prepare(
         Target::Tricks { verbs } => {
             let winetricks = Path::new("winetricks");
             let exe = match profile.runner {
-                Runner::Native | Runner::Proton => {
+                Runner::Native | Runner::Proton | Runner::Slr => {
                     problems.push("`tricks` needs a wine or umu profile".into());
                     winetricks.to_path_buf()
                 }
