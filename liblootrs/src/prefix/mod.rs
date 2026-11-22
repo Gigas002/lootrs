@@ -481,8 +481,19 @@ fn link(prefix: &Path, links: &[(PathBuf, PathBuf)]) -> Result<(), PrefixError> 
 }
 
 /// Removes lootrs's symlinks and restores wine's originals.
+///
+/// Only links lootrs can have made are touched: the state file lives in the
+/// prefix, where anything running can rewrite it.
 fn unlink(prefix: &Path, linked: &Linked) -> Result<(), PrefixError> {
     for link in &linked.links {
+        if !is_dll_link(link) {
+            tracing::warn!(
+                "{}: ignoring `{}`, which is not a DLL in system32 or syswow64",
+                prefix.join(STATE_FILE).display(),
+                link.display()
+            );
+            continue;
+        }
         let path = prefix.join(link);
         let context = || format!("restoring {}", path.display());
         if path.is_symlink() {
@@ -494,6 +505,18 @@ fn unlink(prefix: &Path, linked: &Linked) -> Result<(), PrefixError> {
         }
     }
     Ok(())
+}
+
+/// `drive_c/windows/{system32,syswow64}/<name>.dll`: the only links
+/// [`plan_links`] makes.
+fn is_dll_link(link: &Path) -> bool {
+    let dll = link
+        .file_name()
+        .and_then(|name| Path::new(name).extension())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("dll"));
+    dll && LINK_DIRS
+        .iter()
+        .any(|(_, dir)| link.parent() == Some(Path::new(dir)))
 }
 
 fn write_state(prefix: &Path, state: &PrefixState) -> Result<(), PrefixError> {
