@@ -25,6 +25,28 @@ All notable changes to this project will be documented in this file.
   characters in arguments, environment values and wrappers.
 - Saving a profile writes through a symlinked profile file instead of
   replacing the link, and keeps the file's permissions.
+- `config.toml` and `games.toml` keys lootrs doesn't know are reported:
+  every command warns about `config.toml` ones, and `check` and launches
+  about a game's. They used to be ignored silently.
+- Run logs are `0600` and their runner-log directories `0700`: they hold the
+  environment lootrs set.
+- `chrono` was replaced with `jiff` (RustSec lists `chrono` as unmaintained).
+
+### Fixed
+
+- Launching one game several times at once started it several times; the
+  launches after the first now fail with exit code 4.
+- Runs starting at the same moment could fail with "failed to write the run
+  log".
+- With several runs in the same second, log retention deleted newer logs
+  before older ones.
+- Removing DXVK/VKD3D from a prefix trusted the paths in
+  `<prefix>/.lootrs.toml`, so an edited state file could make lootrs delete
+  or rename files outside the prefix.
+- `run` started the first of several games with the same name; it reports
+  the duplicate now.
+- Prefix lock files had names that could differ between lootrs builds.
+- Run durations were wrong when the clock changed during a run.
 
 ## [0.1.0] - 2026-11-09
 
