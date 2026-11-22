@@ -50,15 +50,18 @@ impl Catalog {
     pub fn load(config_dir: &Path) -> Self {
         let mut catalog = Self::default();
 
-        match load_games(config_dir) {
-            Ok(games) => catalog.games = games,
+        match read_games(config_dir) {
+            Ok((games, warnings)) => {
+                catalog.games = games;
+                catalog.load_warnings = warnings;
+            }
             Err(err) => catalog.load_errors.push(err),
         }
 
         let loaded = profiles::load_dir(&profiles_dir(config_dir));
         catalog.profiles = loaded.profiles;
         catalog.load_errors.extend(loaded.errors);
-        catalog.load_warnings = loaded.warnings;
+        catalog.load_warnings.extend(loaded.warnings);
 
         catalog
     }
@@ -103,10 +106,29 @@ impl Catalog {
     }
 
     /// Validates one game and its profile; `None` if there is no such game.
+    /// Includes their unknown keys, and a duplicate name (which game would run
+    /// is then a guess).
     pub fn validate_game(&self, name: &str, ctx: &ValidationContext) -> Option<Vec<Issue>> {
         let game = self.game(name)?;
         let profile = self.profile(&game.profile);
-        let mut issues = game.validate(profile, ctx);
+        let subjects = [
+            Subject::Game(game.name.clone()),
+            Subject::Profile(game.profile.clone()),
+        ];
+        let mut issues: Vec<Issue> = self
+            .load_warnings
+            .iter()
+            .filter(|issue| subjects.contains(&issue.subject))
+            .cloned()
+            .collect();
+        if self.games.iter().filter(|game| game.name == name).count() > 1 {
+            issues.push(Issue {
+                severity: Severity::Error,
+                subject: Subject::Game(game.name.clone()),
+                message: "duplicate game name".into(),
+            });
+        }
+        issues.extend(game.validate(profile, ctx));
         if let Some(profile) = profile {
             issues.extend(model::validate_profile(profile, ctx));
         }
@@ -132,18 +154,61 @@ pub fn profile_path(config_dir: &Path, name: &str) -> PathBuf {
     profiles::path(&profiles_dir(config_dir), name)
 }
 
+/// Every key a `[[game]]` table may have; `env` takes any key below it.
+pub const GAME_KEYS: &[&str] = &["name", "exe", "profile", "args", "cwd", "game_id", "env"];
+
 /// Loads `games.toml`; a missing file is an empty list.
 pub fn load_games(config_dir: &Path) -> Result<Vec<Game>, StoreError> {
+    read_games(config_dir).map(|(games, _)| games)
+}
+
+/// `games.toml`'s games, plus a warning for every key it doesn't know (a
+/// typo such as `arg = [...]` would otherwise be dropped without a word).
+fn read_games(config_dir: &Path) -> Result<(Vec<Game>, Vec<Issue>), StoreError> {
     let path = games_path(config_dir);
     let Some(content) = read_optional(&path)? else {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), Vec::new()));
     };
-    toml::from_str::<GamesFile>(&content)
-        .map(|file| file.games)
-        .map_err(|source| StoreError::Parse {
-            path,
-            source: Box::new(source),
-        })
+    let parse_error = |source| StoreError::Parse {
+        path: path.clone(),
+        source: Box::new(source),
+    };
+    let games = toml::from_str::<GamesFile>(&content)
+        .map_err(parse_error)?
+        .games;
+    let table: toml::Table = toml::from_str(&content).map_err(parse_error)?;
+    Ok((games, unknown_game_keys(&table, &path)))
+}
+
+fn unknown_game_keys(table: &toml::Table, path: &Path) -> Vec<Issue> {
+    let warn = |subject, message| Issue {
+        severity: Severity::Warning,
+        subject,
+        message,
+    };
+    let mut issues = Vec::new();
+    for (key, value) in table {
+        let Some(games) = value.as_array().filter(|_| key == "game") else {
+            issues.push(warn(
+                Subject::File(path.to_path_buf()),
+                format!("unknown key `{key}` is ignored"),
+            ));
+            continue;
+        };
+        for game in games.iter().filter_map(toml::Value::as_table) {
+            let name = game
+                .get("name")
+                .and_then(toml::Value::as_str)
+                .unwrap_or_default();
+            for key in game.keys().filter(|key| !GAME_KEYS.contains(&key.as_str())) {
+                issues.push(warn(
+                    Subject::Game(name.to_owned()),
+                    format!("unknown key `{key}` is ignored"),
+                ));
+            }
+        }
+    }
+    issues
 }
 
 /// Loads one profile file and checks that its `name` matches the file stem.
