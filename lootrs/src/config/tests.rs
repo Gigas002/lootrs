@@ -20,10 +20,36 @@ fn example_config_parses() {
 }
 
 #[test]
-fn unknown_keys_are_ignored() {
-    let config = parse("log_keep = 3\nfuture_option = true\n").unwrap();
+fn unknown_keys_are_ignored_and_reported() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join(FILE_NAME),
+        "log_keep = 3\nlog_kep = 2\n[future]\nx = 1\n",
+    )
+    .unwrap();
 
-    assert_eq!(config.log_keep, Some(3));
+    let loaded = load(dir.path()).unwrap().unwrap();
+
+    assert_eq!(loaded.config.log_keep, Some(3));
+    assert_eq!(loaded.warnings.len(), 2, "{:?}", loaded.warnings);
+    assert!(loaded.warnings[1].ends_with("unknown key `log_kep` is ignored"));
+}
+
+#[test]
+fn example_config_has_only_known_keys() {
+    let uncommented: String = EXAMPLE_CONFIG
+        .lines()
+        .map(|line| {
+            line.strip_prefix("# ")
+                .filter(|l| l.contains(" = "))
+                .unwrap_or(line)
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(parse(&uncommented).is_ok());
+    assert_eq!(unknown_keys(&uncommented), Vec::<String>::new());
+    assert_eq!(uncommented.matches(" = ").count(), KEYS.len());
 }
 
 #[test]
@@ -43,10 +69,11 @@ fn load_reads_file() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join(FILE_NAME), "log_dir = \"/var/log/lootrs\"").unwrap();
 
-    let config = load(dir.path()).unwrap().unwrap();
+    let loaded = load(dir.path()).unwrap().unwrap();
 
+    assert!(loaded.warnings.is_empty());
     assert_eq!(
-        config.log_dir.as_deref(),
+        loaded.config.log_dir.as_deref(),
         Some(Path::new("/var/log/lootrs"))
     );
 }

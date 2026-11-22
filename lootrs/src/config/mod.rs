@@ -14,7 +14,8 @@ mod tests;
 
 pub const FILE_NAME: &str = "config.toml";
 
-/// Raw contents of `config.toml`. Unknown keys are ignored.
+/// Raw contents of `config.toml`. Unknown keys are ignored, and reported by
+/// [`load`].
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 pub struct FileConfig {
     pub log_level: Option<LogLevel>,
@@ -63,8 +64,27 @@ pub enum ConfigError {
     },
 }
 
+/// Every key [`FileConfig`] reads.
+pub const KEYS: &[&str] = &[
+    "log_level",
+    "log_dir",
+    "log_keep",
+    "stop_timeout_secs",
+    "prefix_root",
+    "umu_runtime_update",
+    "battleye_runtime",
+    "eac_runtime",
+];
+
+/// `config.toml` as loaded: its settings, and a warning per unknown key.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Loaded {
+    pub config: FileConfig,
+    pub warnings: Vec<String>,
+}
+
 /// Loads `config.toml` from `config_dir`; a missing file is `Ok(None)`.
-pub fn load(config_dir: &Path) -> Result<Option<FileConfig>, ConfigError> {
+pub fn load(config_dir: &Path) -> Result<Option<Loaded>, ConfigError> {
     let path = config_dir.join(FILE_NAME);
     let content = match std::fs::read_to_string(&path) {
         Ok(content) => content,
@@ -72,9 +92,29 @@ pub fn load(config_dir: &Path) -> Result<Option<FileConfig>, ConfigError> {
         Err(source) => return Err(ConfigError::Io { path, source }),
     };
 
-    parse(&content)
-        .map(Some)
-        .map_err(|source| ConfigError::Parse { path, source })
+    let config = parse(&content).map_err(|source| ConfigError::Parse {
+        path: path.clone(),
+        source,
+    })?;
+    let warnings = unknown_keys(&content)
+        .into_iter()
+        .map(|key| format!("{}: unknown key `{key}` is ignored", path.display()))
+        .collect();
+    Ok(Some(Loaded { config, warnings }))
+}
+
+/// Top-level keys of `content` that [`FileConfig`] doesn't read. A typo such
+/// as `log_kep` would otherwise fall back to the default without a word.
+pub fn unknown_keys(content: &str) -> Vec<String> {
+    toml::from_str::<toml::Table>(content)
+        .map(|table| {
+            table
+                .keys()
+                .filter(|key| !KEYS.contains(&key.as_str()))
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Parses `config.toml` contents.

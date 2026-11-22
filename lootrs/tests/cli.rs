@@ -407,6 +407,28 @@ fn run_status_stop_cycle() {
 }
 
 #[test]
+fn typos_in_config_and_games_are_reported() {
+    let home = tempfile::tempdir().unwrap();
+    let name = format!("typo-{}", std::process::id());
+    fake_game_named(home.path(), &name);
+    let config = home.path().join(".config/lootrs");
+    std::fs::write(config.join("config.toml"), "log_kep = 2\n").unwrap();
+    let games = std::fs::read_to_string(config.join("games.toml")).unwrap();
+    std::fs::write(config.join("games.toml"), games + "argz = [\"-x\"]\n").unwrap();
+
+    let list = lootrs(home.path(), &["list"]);
+    let stderr = String::from_utf8(list.stderr).unwrap();
+    assert!(list.status.success());
+    assert!(
+        stderr.contains("unknown key `log_kep` is ignored"),
+        "{stderr}"
+    );
+
+    let check = String::from_utf8(lootrs(home.path(), &["check", &name]).stdout).unwrap();
+    assert!(check.contains("unknown key `argz` is ignored"), "{check}");
+}
+
+#[test]
 fn concurrent_runs_start_the_game_once() {
     let home = tempfile::tempdir().unwrap();
     let name = format!("race-{}", std::process::id());

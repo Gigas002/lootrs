@@ -133,6 +133,9 @@ pub struct Settings {
     /// `$PAGER` (may include arguments), `less` by default; the TUI opens logs with it.
     pub pager: String,
     pub action: Action,
+    /// Problems in `config.toml` that didn't stop it from loading; `main`
+    /// logs them once logging is set up.
+    pub warnings: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -206,7 +209,10 @@ impl Settings {
             Some(dir) => absolute(dir)?,
             None => defaults.config,
         };
-        let file = config::load(&config_dir)?.unwrap_or_default();
+        let config::Loaded {
+            config: file,
+            warnings,
+        } = config::load(&config_dir)?.unwrap_or_default();
         let from_config = |key, path| config_path(key, path, &xdg.home);
 
         let log_dir = match cli.log_dir {
@@ -276,6 +282,7 @@ impl Settings {
             },
             pager,
             action,
+            warnings,
         })
     }
 }

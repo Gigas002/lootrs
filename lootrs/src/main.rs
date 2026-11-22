@@ -21,6 +21,10 @@ fn main() -> ExitCode {
         }
     };
 
+    for warning in &settings.warnings {
+        tracing::warn!("{warning}");
+    }
+
     match app::run(&settings) {
         Ok(code) => ExitCode::from(code),
         Err(err) if err.is_broken_pipe() => ExitCode::SUCCESS,
