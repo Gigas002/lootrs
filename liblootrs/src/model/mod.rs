@@ -3,22 +3,15 @@
 //! Validation never fails fast: it returns every [`Issue`] it finds, so `check`
 //! and the TUI can show them all at once.
 
-use std::{
-    collections::BTreeMap,
-    fmt,
-    path::{Path, PathBuf},
-};
+use std::path::Path;
 
 mod game;
-mod profile;
 
 pub use game::Game;
-pub use profile::{
-    Anticheat, Profile, ProtonSection, Runner, ShaderCache, SteamIntegration, UmuSection,
-    WineSection,
+pub use libgameprofiles::{
+    Anticheat, Issue, Issues, Profile, ProtonSection, Runner, Severity, ShaderCache, SlrSection,
+    SteamIntegration, Subject, UmuSection, WineSection, validate_name,
 };
-
-use crate::paths;
 
 #[cfg(test)]
 mod tests;
@@ -34,133 +27,62 @@ pub struct ValidationContext<'a> {
     pub eac_runtime: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Severity {
-    Warning,
-    Error,
-}
-
-/// What an [`Issue`] is about.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Subject {
-    Game(String),
-    Profile(String),
-    /// A file that could not be loaded at all.
-    File(PathBuf),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Issue {
-    pub severity: Severity,
-    pub subject: Subject,
-    pub message: String,
-}
-
-impl fmt::Display for Severity {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::Warning => "warning",
-            Self::Error => "error",
-        })
+/// Whether this build of lootrs can launch `runner` (Cargo features `wine`
+/// and `umu`). `proton` never is: it runs through Steam.
+pub fn runner_available(runner: Runner) -> bool {
+    match runner {
+        Runner::Wine => cfg!(feature = "wine"),
+        Runner::Umu => cfg!(feature = "umu"),
+        Runner::Native => true,
+        Runner::Proton => false,
     }
 }
 
-impl fmt::Display for Subject {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Game(name) => write!(f, "game `{name}`"),
-            Self::Profile(name) => write!(f, "profile `{name}`"),
-            Self::File(path) => write!(f, "{}", path.display()),
-        }
-    }
-}
+/// What's wrong with `profile` for a lootrs launch: the file's own issues
+/// ([`Profile::validate`]) plus what lootrs needs to run it.
+pub fn validate_profile(profile: &Profile, ctx: &ValidationContext) -> Vec<Issue> {
+    let mut issues = Issues::new(Subject::Profile(profile.name.clone()));
+    issues.extend(profile.validate(ctx.home));
+    let runner = profile.runner;
 
-impl fmt::Display for Issue {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}: {}: {}", self.severity, self.subject, self.message)
+    if runner == Runner::Proton {
+        issues.error(crate::launch::PROTON_UNSUPPORTED);
+        return issues.finish();
     }
-}
-
-/// Checks a game or profile name: `[A-Za-z0-9._-]+`, not `.`/`..`, not starting with `-`.
-///
-/// Names are used as CLI arguments, file names and process tags.
-pub fn validate_name(name: &str) -> Result<(), String> {
-    if name.is_empty() {
-        return Err("name must not be empty".into());
-    }
-    if name == "." || name == ".." || name.starts_with('-') {
-        return Err(format!("name `{name}` is not allowed"));
-    }
-    if let Some(c) = name
-        .chars()
-        .find(|c| !(c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-')))
-    {
-        return Err(format!(
-            "name `{name}` contains `{c}`; use only letters, digits, `.`, `_` and `-`"
+    if !runner_available(runner) {
+        issues.error(format!(
+            "runner `{runner}` is not available: lootrs was built without the `{runner}` feature"
         ));
     }
-    Ok(())
+    if runner == Runner::Native && profile.slr.is_some() {
+        issues.error(SLR_UNSUPPORTED);
+    }
+    if runner.is_windows() && profile.prefix.is_none() {
+        issues.error(format!("`prefix` is required for runner `{runner}`"));
+    }
+    if runner == Runner::Umu && profile.umu.as_ref().is_none_or(|umu| umu.proton.is_none()) {
+        issues.error(PROTON_REQUIRED);
+    }
+
+    let anticheat = profile.anticheat;
+    if runner.is_windows() {
+        if anticheat.battleye && !ctx.battleye_runtime {
+            issues.error("`anticheat.battleye` needs `battleye_runtime` in config.toml");
+        }
+        if anticheat.eac && !ctx.eac_runtime {
+            issues.error("`anticheat.eac` needs `eac_runtime` in config.toml");
+        }
+        if runner == Runner::Wine && !anticheat.is_off() {
+            issues.warn("anti-cheat runtimes only work with Proton-based wine builds");
+        }
+    }
+    issues.finish()
 }
 
-/// Collects issues for one subject.
-struct Issues {
-    subject: Subject,
-    list: Vec<Issue>,
-}
+const PROTON_REQUIRED: &str = "`[umu].proton` is required: an absolute path to a Proton build \
+     (without it umu would download Proton)";
 
-impl Issues {
-    fn new(subject: Subject) -> Self {
-        Self {
-            subject,
-            list: Vec::new(),
-        }
-    }
-
-    fn push(&mut self, severity: Severity, message: impl Into<String>) {
-        self.list.push(Issue {
-            severity,
-            subject: self.subject.clone(),
-            message: message.into(),
-        });
-    }
-
-    fn error(&mut self, message: impl Into<String>) {
-        self.push(Severity::Error, message);
-    }
-
-    fn warn(&mut self, message: impl Into<String>) {
-        self.push(Severity::Warning, message);
-    }
-
-    fn name(&mut self, name: &str) {
-        if let Err(message) = validate_name(name) {
-            self.error(message);
-        }
-    }
-
-    /// Errors unless `path` is absolute after `~` expansion; returns the expanded path.
-    fn absolute(&mut self, field: &str, path: &Path, home: &Path) -> Option<PathBuf> {
-        let expanded = paths::expand_tilde(path, home);
-        if expanded.is_absolute() {
-            Some(expanded)
-        } else {
-            self.error(format!(
-                "`{field}` must be an absolute path (or start with `~`), got `{}`",
-                path.display()
-            ));
-            None
-        }
-    }
-
-    fn env(&mut self, env: &BTreeMap<String, String>) {
-        for key in env.keys() {
-            if key.is_empty() || key.contains(['=', '\0']) {
-                self.error(format!("`env` key `{key}` is not a valid variable name"));
-            }
-        }
-    }
-
-    fn finish(self) -> Vec<Issue> {
-        self.list
-    }
-}
+/// lootrs runs `native` games directly, so it can't keep what `[slr]` asks
+/// for (a runtime container, a private home).
+pub(crate) const SLR_UNSUPPORTED: &str =
+    "`[slr]` profiles run in a Steam Linux Runtime: use sruman; lootrs can't launch them";

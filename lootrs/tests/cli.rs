@@ -195,7 +195,17 @@ fn check_unknown_game_is_usage_error() {
 }
 
 /// A native profile plus a fake game script that echoes its args and env, then exits 3.
+/// A native game `fake`. See [`fake_game_named`].
 fn fake_game(home: &Path) -> PathBuf {
+    fake_game_named(home, "fake")
+}
+
+/// A native game `name` whose script echoes and exits 3; returns its log dir.
+///
+/// lootrs finds running games by scanning every process of the user, and
+/// tests run in parallel, so each test that runs a game needs its own name:
+/// a game left running by one test would be "already running" in another.
+fn fake_game_named(home: &Path, name: &str) -> PathBuf {
     let config = home.join(".config/lootrs");
     std::fs::create_dir_all(config.join("profiles")).unwrap();
     std::fs::create_dir_all(home.join("game")).unwrap();
@@ -208,7 +218,7 @@ fn fake_game(home: &Path) -> PathBuf {
 
     std::fs::write(
         config.join("games.toml"),
-        "[[game]]\nname = \"fake\"\nexe = \"~/game/game.sh\"\nprofile = \"native\"\nargs = [\"-a\"]\nenv = { GAME_VAR = \"v\" }\n",
+        format!("[[game]]\nname = \"{name}\"\nexe = \"~/game/game.sh\"\nprofile = \"native\"\nargs = [\"-a\"]\nenv = {{ GAME_VAR = \"v\" }}\n"),
     )
     .unwrap();
     std::fs::write(
@@ -216,7 +226,7 @@ fn fake_game(home: &Path) -> PathBuf {
         "name = \"native\"\nrunner = \"native\"\n",
     )
     .unwrap();
-    home.join(".local/state/lootrs/logs/games/fake")
+    home.join(".local/state/lootrs/logs/games").join(name)
 }
 
 fn read_latest(logs: &Path) -> String {
@@ -226,14 +236,17 @@ fn read_latest(logs: &Path) -> String {
 #[test]
 fn run_wait_passes_exit_code_and_logs_output() {
     let home = tempfile::tempdir().unwrap();
-    let logs = fake_game(home.path());
+    let logs = fake_game_named(home.path(), "fake-wait");
 
-    let output = lootrs(home.path(), &["run", "fake", "--wait", "-q", "--", "extra"]);
+    let output = lootrs(
+        home.path(),
+        &["run", "fake-wait", "--wait", "-q", "--", "extra"],
+    );
 
     assert_eq!(output.status.code(), Some(3));
     let stdout = String::from_utf8(output.stdout).unwrap();
     let expected = format!(
-        "args=-a extra tag=fake var=v cwd={}",
+        "args=-a extra tag=fake-wait var=v cwd={}",
         home.path().join("game").display()
     );
     assert_eq!(stdout.trim(), expected);
@@ -248,13 +261,16 @@ fn run_wait_passes_exit_code_and_logs_output() {
 #[test]
 fn run_detached_returns_and_supervisor_finishes_log() {
     let home = tempfile::tempdir().unwrap();
-    let logs = fake_game(home.path());
+    let logs = fake_game_named(home.path(), "fake-detached");
 
-    let output = lootrs(home.path(), &["run", "fake"]);
+    let output = lootrs(home.path(), &["run", "fake-detached"]);
 
     assert!(output.status.success(), "{output:?}");
     let stdout = String::from_utf8(output.stdout).unwrap();
-    assert!(stdout.starts_with("started `fake` (pid "), "{stdout}");
+    assert!(
+        stdout.starts_with("started `fake-detached` (pid "),
+        "{stdout}"
+    );
     assert!(stdout.contains(&logs.display().to_string()), "{stdout}");
 
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -267,7 +283,7 @@ fn run_detached_returns_and_supervisor_finishes_log() {
     }
     assert!(read_latest(&logs).contains("=== exit: code 3"));
 
-    let path = lootrs(home.path(), &["logs", "fake", "--path"]);
+    let path = lootrs(home.path(), &["logs", "fake-detached", "--path"]);
     assert_eq!(
         String::from_utf8(path.stdout).unwrap().trim(),
         std::fs::canonicalize(logs.join("latest.log"))
@@ -280,10 +296,10 @@ fn run_detached_returns_and_supervisor_finishes_log() {
 #[test]
 fn run_preflight_failure_is_logged() {
     let home = tempfile::tempdir().unwrap();
-    let logs = fake_game(home.path());
+    let logs = fake_game_named(home.path(), "fake-preflight");
     std::fs::remove_file(home.path().join("game/game.sh")).unwrap();
 
-    let output = lootrs(home.path(), &["run", "fake"]);
+    let output = lootrs(home.path(), &["run", "fake-preflight"]);
 
     assert_eq!(output.status.code(), Some(2));
     let stderr = String::from_utf8(output.stderr).unwrap();

@@ -132,6 +132,11 @@ pub fn prepare(
             problems: vec![PROTON_UNSUPPORTED.into()],
         });
     }
+    if profile.runner == Runner::Native && profile.slr.is_some() {
+        return Err(LaunchError {
+            problems: vec![crate::model::SLR_UNSUPPORTED.into()],
+        });
+    }
     let mut problems = Vec::new();
     let home = ctx.home;
 
@@ -233,7 +238,7 @@ pub fn prepare(
     let shader_cache = match (target, &profile.shader_cache) {
         (Target::Game(game), Some(ShaderCache::Dir(dir))) => {
             let dir = paths::expand_tilde(dir, home).join(&game.name);
-            for (key, value) in ShaderCache::env(&dir) {
+            for (key, value) in ShaderCache::env(&dir, profile.runner) {
                 runner_env.insert(key.to_owned(), value.into_os_string());
             }
             Some(dir)

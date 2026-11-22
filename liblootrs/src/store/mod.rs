@@ -2,6 +2,7 @@
 //!
 //! Loading is forgiving: a broken file is reported in [`Catalog::load_errors`]
 //! and everything else still loads. Writes are atomic (temp file + rename).
+//! Profiles are loaded and written by `libgameprofiles::store`.
 
 use std::{
     collections::HashSet,
@@ -11,6 +12,8 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
+use libgameprofiles::store as profiles;
+
 use crate::model::{self, Game, Issue, Profile, Severity, Subject, ValidationContext};
 
 #[cfg(test)]
@@ -19,64 +22,9 @@ mod tests;
 pub const GAMES_FILE: &str = "games.toml";
 pub const PROFILES_DIR: &str = "profiles";
 
-#[derive(Debug, thiserror::Error)]
-pub enum StoreError {
-    #[error("failed to read {}: {source}", path.display())]
-    Read { path: PathBuf, source: io::Error },
-
-    #[error("failed to write {}: {source}", path.display())]
-    Write { path: PathBuf, source: io::Error },
-
-    #[error("invalid {}: {source}", path.display())]
-    Parse {
-        path: PathBuf,
-        source: toml::de::Error,
-    },
-
-    #[error("failed to serialize {}: {source}", path.display())]
-    Serialize {
-        path: PathBuf,
-        source: toml::ser::Error,
-    },
-
-    #[error("{}: `name = \"{name}\"` must match the file name `{stem}`", path.display())]
-    NameMismatch {
-        path: PathBuf,
-        name: String,
-        stem: String,
-    },
-
-    #[error("invalid profile name: {0}")]
-    InvalidName(String),
-}
-
-impl StoreError {
-    /// The file this error is about, if any.
-    pub fn path(&self) -> Option<&Path> {
-        match self {
-            Self::Read { path, .. }
-            | Self::Write { path, .. }
-            | Self::Parse { path, .. }
-            | Self::Serialize { path, .. }
-            | Self::NameMismatch { path, .. } => Some(path),
-            Self::InvalidName(_) => None,
-        }
-    }
-
-    /// The error without the file path, for when the path is shown separately.
-    pub fn detail(&self) -> String {
-        match self {
-            Self::Read { source, .. } => format!("failed to read: {source}"),
-            Self::Write { source, .. } => format!("failed to write: {source}"),
-            Self::Parse { source, .. } => format!("invalid TOML: {source}"),
-            Self::Serialize { source, .. } => format!("failed to serialize: {source}"),
-            Self::NameMismatch { name, stem, .. } => {
-                format!("`name = \"{name}\"` must match the file name `{stem}`")
-            }
-            Self::InvalidName(message) => message.clone(),
-        }
-    }
-}
+/// Why a file couldn't be loaded or written: libgameprofiles' store error,
+/// used for `games.toml` too.
+pub use libgameprofiles::store::Error as StoreError;
 
 /// On-disk shape of `games.toml`.
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -93,6 +41,8 @@ pub struct Catalog {
     pub profiles: Vec<Profile>,
     /// Files that could not be loaded; their contents are missing from the lists.
     pub load_errors: Vec<StoreError>,
+    /// Keys in the profile files that the format doesn't know.
+    pub load_warnings: Vec<Issue>,
 }
 
 impl Catalog {
@@ -105,19 +55,11 @@ impl Catalog {
             Err(err) => catalog.load_errors.push(err),
         }
 
-        match profile_paths(config_dir) {
-            Ok(paths) => {
-                for path in paths {
-                    match load_profile(&path) {
-                        Ok(profile) => catalog.profiles.push(profile),
-                        Err(err) => catalog.load_errors.push(err),
-                    }
-                }
-            }
-            Err(err) => catalog.load_errors.push(err),
-        }
+        let loaded = profiles::load_dir(&profiles_dir(config_dir));
+        catalog.profiles = loaded.profiles;
+        catalog.load_errors.extend(loaded.errors);
+        catalog.load_warnings = loaded.warnings;
 
-        catalog.profiles.sort_by(|a, b| a.name.cmp(&b.name));
         catalog
     }
 
@@ -129,13 +71,12 @@ impl Catalog {
         self.profiles.iter().find(|profile| profile.name == name)
     }
 
-    /// Files that failed to load, as error issues.
+    /// Files that failed to load (errors) and unknown keys (warnings).
     pub fn load_issues(&self) -> impl Iterator<Item = Issue> + '_ {
-        self.load_errors.iter().map(|err| Issue {
-            severity: Severity::Error,
-            subject: Subject::File(err.path().map(Path::to_path_buf).unwrap_or_default()),
-            message: err.detail(),
-        })
+        self.load_errors
+            .iter()
+            .map(StoreError::to_issue)
+            .chain(self.load_warnings.iter().cloned())
     }
 
     /// Validates everything, including load errors and duplicate game names.
@@ -155,7 +96,7 @@ impl Catalog {
         }
 
         for profile in &self.profiles {
-            issues.extend(profile.validate(ctx));
+            issues.extend(model::validate_profile(profile, ctx));
         }
 
         issues
@@ -167,14 +108,15 @@ impl Catalog {
         let profile = self.profile(&game.profile);
         let mut issues = game.validate(profile, ctx);
         if let Some(profile) = profile {
-            issues.extend(profile.validate(ctx));
+            issues.extend(model::validate_profile(profile, ctx));
         }
         Some(issues)
     }
 
     /// Validates one profile; `None` if there is no such profile.
     pub fn validate_profile(&self, name: &str, ctx: &ValidationContext) -> Option<Vec<Issue>> {
-        self.profile(name).map(|profile| profile.validate(ctx))
+        self.profile(name)
+            .map(|profile| model::validate_profile(profile, ctx))
     }
 }
 
@@ -187,7 +129,7 @@ pub fn profiles_dir(config_dir: &Path) -> PathBuf {
 }
 
 pub fn profile_path(config_dir: &Path, name: &str) -> PathBuf {
-    profiles_dir(config_dir).join(format!("{name}.toml"))
+    profiles::path(&profiles_dir(config_dir), name)
 }
 
 /// Loads `games.toml`; a missing file is an empty list.
@@ -198,29 +140,15 @@ pub fn load_games(config_dir: &Path) -> Result<Vec<Game>, StoreError> {
     };
     toml::from_str::<GamesFile>(&content)
         .map(|file| file.games)
-        .map_err(|source| StoreError::Parse { path, source })
+        .map_err(|source| StoreError::Parse {
+            path,
+            source: Box::new(source),
+        })
 }
 
 /// Loads one profile file and checks that its `name` matches the file stem.
 pub fn load_profile(path: &Path) -> Result<Profile, StoreError> {
-    let content = std::fs::read_to_string(path).map_err(|source| StoreError::Read {
-        path: path.to_path_buf(),
-        source,
-    })?;
-    let profile: Profile = toml::from_str(&content).map_err(|source| StoreError::Parse {
-        path: path.to_path_buf(),
-        source,
-    })?;
-
-    let stem = path.file_stem().unwrap_or_default().to_string_lossy();
-    if profile.name != stem {
-        return Err(StoreError::NameMismatch {
-            path: path.to_path_buf(),
-            name: profile.name,
-            stem: stem.into_owned(),
-        });
-    }
-    Ok(profile)
+    profiles::load(path).map(|(profile, _)| profile)
 }
 
 /// Writes `games.toml`.
@@ -238,45 +166,12 @@ pub fn save_games(config_dir: &Path, games: &[Game]) -> Result<(), StoreError> {
 
 /// Writes `profiles/<name>.toml`.
 pub fn save_profile(config_dir: &Path, profile: &Profile) -> Result<(), StoreError> {
-    model::validate_name(&profile.name).map_err(StoreError::InvalidName)?;
-    let path = profile_path(config_dir, &profile.name);
-    let content = toml::to_string_pretty(profile).map_err(|source| StoreError::Serialize {
-        path: path.clone(),
-        source,
-    })?;
-    write_atomic(&path, &content)
+    profiles::save(&profiles_dir(config_dir), profile).map(|_| ())
 }
 
 /// Deletes `profiles/<name>.toml`. The prefix directory is never touched.
 pub fn remove_profile(config_dir: &Path, name: &str) -> Result<(), StoreError> {
-    model::validate_name(name).map_err(StoreError::InvalidName)?;
-    let path = profile_path(config_dir, name);
-    std::fs::remove_file(&path).map_err(|source| StoreError::Write { path, source })
-}
-
-/// `profiles/*.toml`, sorted; a missing directory is empty.
-fn profile_paths(config_dir: &Path) -> Result<Vec<PathBuf>, StoreError> {
-    let dir = profiles_dir(config_dir);
-    let entries = match std::fs::read_dir(&dir) {
-        Ok(entries) => entries,
-        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(source) => return Err(StoreError::Read { path: dir, source }),
-    };
-
-    let mut paths = Vec::new();
-    for entry in entries {
-        let path = entry
-            .map_err(|source| StoreError::Read {
-                path: dir.clone(),
-                source,
-            })?
-            .path();
-        if path.extension().is_some_and(|ext| ext == "toml") && path.is_file() {
-            paths.push(path);
-        }
-    }
-    paths.sort();
-    Ok(paths)
+    profiles::remove(&profiles_dir(config_dir), name)
 }
 
 fn read_optional(path: &Path) -> Result<Option<String>, StoreError> {
@@ -290,18 +185,6 @@ fn read_optional(path: &Path) -> Result<Option<String>, StoreError> {
     }
 }
 
-/// Writes to `<file>.tmp` next to `path`, then renames over it.
 fn write_atomic(path: &Path, content: &str) -> Result<(), StoreError> {
-    let write_err = |source| StoreError::Write {
-        path: path.to_path_buf(),
-        source,
-    };
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(write_err)?;
-    }
-
-    let mut tmp = path.as_os_str().to_owned();
-    tmp.push(".tmp");
-    std::fs::write(&tmp, content).map_err(write_err)?;
-    std::fs::rename(&tmp, path).map_err(write_err)
+    profiles::write_atomic(path, content)
 }

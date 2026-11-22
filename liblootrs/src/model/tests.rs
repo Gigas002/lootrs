@@ -1,3 +1,6 @@
+//! lootrs' own checks. The profile format and its file-level checks are
+//! libgameprofiles' and tested there.
+
 use std::{collections::BTreeMap, path::Path};
 
 use super::*;
@@ -58,57 +61,43 @@ fn game(exe: &Path) -> Game {
     }
 }
 
-#[test]
-fn valid_names() {
-    for name in ["wow", "Witcher-3", "game_1.2"] {
-        assert_eq!(validate_name(name), Ok(()), "{name}");
-    }
-}
-
-#[test]
-fn invalid_names() {
-    for name in ["", ".", "..", "-wow", "my game", "a/b", "wöw"] {
-        assert!(validate_name(name).is_err(), "{name}");
-    }
-}
-
-#[test]
-fn issue_display() {
-    let issue = Issue {
-        severity: Severity::Error,
-        subject: Subject::Game("wow".into()),
-        message: "broken".into(),
-    };
-
-    assert_eq!(issue.to_string(), "error: game `wow`: broken");
-}
-
 #[cfg(feature = "wine")]
 #[test]
 fn minimal_wine_profile_is_valid() {
-    assert_eq!(wine_profile().validate(&ctx()), Vec::new());
+    assert_eq!(validate_profile(&wine_profile(), &ctx()), Vec::new());
 }
 
 #[cfg(feature = "umu")]
 #[test]
 fn minimal_umu_profile_is_valid() {
-    assert_eq!(umu_profile().validate(&ctx()), Vec::new());
+    assert_eq!(validate_profile(&umu_profile(), &ctx()), Vec::new());
 }
 
 #[test]
 fn native_profile_is_always_available() {
+    assert!(runner_available(Runner::Native));
     assert_eq!(
-        Profile::new("native", Runner::Native).validate(&ctx()),
+        validate_profile(&Profile::new("native", Runner::Native), &ctx()),
         Vec::new()
     );
 }
 
 #[test]
-fn proton_is_not_launched() {
-    assert!(!Runner::Proton.is_available());
-    // Only the one error: the rest of a `proton` profile isn't lootrs' to judge.
+fn file_issues_come_first() {
+    // libgameprofiles' own checks run too: a relative prefix is its error.
     let profile = Profile {
         prefix: Some("relative".into()),
+        ..Profile::new("p", Runner::Wine)
+    };
+    let issues = validate_profile(&profile, &ctx());
+    assert!(errors(&issues)[0].starts_with("`prefix` must be an absolute path"));
+}
+
+#[test]
+fn proton_is_not_launched() {
+    assert!(!runner_available(Runner::Proton));
+    let profile = Profile {
+        prefix: Some("/pfx".into()),
         proton: Some(ProtonSection {
             build: Some("experimental".into()),
         }),
@@ -116,38 +105,29 @@ fn proton_is_not_launched() {
         ..Profile::new("proton", Runner::Proton)
     };
     assert_eq!(
-        errors(&profile.validate(&ctx())),
+        errors(&validate_profile(&profile, &ctx())),
         ["runner `proton` runs through Steam; lootrs can't launch it"]
     );
-    assert!(warnings(&profile.validate(&ctx())).is_empty());
+    assert!(warnings(&validate_profile(&profile, &ctx())).is_empty());
 }
 
 #[test]
-fn proton_sections_are_kept_quietly() {
+fn slr_profiles_are_sruman_s() {
     let profile = Profile {
-        proton: Some(ProtonSection::default()),
-        steam: Some(SteamIntegration::None),
-        ..Profile::new("native", Runner::Native)
+        prefix: Some("/pfx".into()),
+        slr: Some(SlrSection::new("sniper")),
+        ..Profile::new("sniper", Runner::Native)
     };
-    assert_eq!(profile.validate(&ctx()), Vec::new());
-}
-
-#[test]
-fn proton_build_is_path() {
-    let build = |b: &str| ProtonSection {
-        build: Some(b.into()),
-    };
-    assert!(build("/opt/proton").build_is_path());
-    assert!(build("~/proton").build_is_path());
-    assert!(build("dir/proton").build_is_path());
-    assert!(!build("experimental").build_is_path());
-    assert!(!ProtonSection::default().build_is_path());
+    assert_eq!(
+        errors(&validate_profile(&profile, &ctx())),
+        [SLR_UNSUPPORTED]
+    );
 }
 
 #[cfg(not(feature = "umu"))]
 #[test]
 fn runner_without_feature_is_an_error() {
-    let issues = umu_profile().validate(&ctx());
+    let issues = validate_profile(&umu_profile(), &ctx());
 
     assert_eq!(
         errors(&issues),
@@ -158,7 +138,7 @@ fn runner_without_feature_is_an_error() {
 #[test]
 fn prefix_required_for_wine_and_umu() {
     for runner in [Runner::Wine, Runner::Umu] {
-        let issues = Profile::new("p", runner).validate(&ctx());
+        let issues = validate_profile(&Profile::new("p", runner), &ctx());
 
         assert!(
             errors(&issues)
@@ -170,117 +150,13 @@ fn prefix_required_for_wine_and_umu() {
 }
 
 #[test]
-fn relative_paths_are_errors() {
-    let profile = Profile {
-        prefix: Some("prefixes/default".into()),
-        dxvk: Some("dxvk".into()),
-        wine: Some(WineSection {
-            path: Some("wine".into()),
-        }),
-        ..wine_profile()
-    };
-
-    let issues = profile.validate(&ctx());
-    let errors = errors(&issues);
-
-    assert!(errors.iter().any(|m| m.starts_with("`prefix` must be")));
-    assert!(errors.iter().any(|m| m.starts_with("`dxvk` must be")));
-    assert!(errors.iter().any(|m| m.starts_with("`wine.path` must be")));
-}
-
-#[test]
 fn umu_requires_proton() {
     let mut profile = umu_profile();
     profile.umu = None;
-    assert!(errors(&profile.validate(&ctx())).contains(&PROTON_REQUIRED_MESSAGE));
+    assert!(errors(&validate_profile(&profile, &ctx())).contains(&PROTON_REQUIRED));
 
     profile.umu = Some(UmuSection::default());
-    assert!(errors(&profile.validate(&ctx())).contains(&PROTON_REQUIRED_MESSAGE));
-}
-
-const PROTON_REQUIRED_MESSAGE: &str = "`[umu].proton` is required: an absolute path to a Proton \
-     build (without it umu would download Proton)";
-
-#[test]
-fn dxvk_and_vkd3d_ignored_for_umu() {
-    let profile = Profile {
-        dxvk: Some("/dxvk".into()),
-        vkd3d: Some("relative-is-not-checked".into()),
-        ..umu_profile()
-    };
-
-    let issues = profile.validate(&ctx());
-
-    assert!(
-        errors(&issues)
-            .iter()
-            .all(|message| !message.contains("dxvk") && !message.contains("vkd3d"))
-    );
-    let warnings = warnings(&issues);
-    assert!(warnings[0].starts_with("`dxvk` is ignored for runner `umu`"));
-    assert!(warnings[1].starts_with("`vkd3d` is ignored for runner `umu`"));
-}
-
-#[test]
-fn mismatched_sections_are_ignored_with_warnings() {
-    let profile = Profile {
-        umu: Some(UmuSection::default()),
-        ..wine_profile()
-    };
-    assert!(warnings(&profile.validate(&ctx())).contains(&"`[umu]` is ignored for runner `wine`"));
-
-    let profile = Profile {
-        prefix: Some("/pfx".into()),
-        wine: Some(WineSection::default()),
-        dll_overrides: BTreeMap::from([("d3d11".into(), "n".into())]),
-        anticheat: Anticheat {
-            battleye: true,
-            eac: false,
-        },
-        ..Profile::new("native", Runner::Native)
-    };
-    let issues = profile.validate(&ctx());
-
-    assert_eq!(errors(&issues), Vec::<&str>::new());
-    assert_eq!(
-        warnings(&issues),
-        [
-            "`prefix` is ignored for runner `native`",
-            "`[wine]` is ignored for runner `native`",
-            "`dll_overrides` is ignored for runner `native`",
-            "`[anticheat]` is ignored for runner `native`",
-        ]
-    );
-}
-
-#[test]
-fn dll_override_modes() {
-    for mode in ["n", "b", "n,b", "b,n", "native,builtin", ""] {
-        assert_eq!(
-            validate_dll_override_for_test("winhttp", mode),
-            Ok(()),
-            "{mode}"
-        );
-    }
-    for (dll, mode) in [("winhttp", "x"), ("winhttp", "n,"), ("", "n"), ("a=b", "n")] {
-        assert!(
-            validate_dll_override_for_test(dll, mode).is_err(),
-            "{dll}={mode}"
-        );
-    }
-}
-
-fn validate_dll_override_for_test(dll: &str, mode: &str) -> Result<(), ()> {
-    let profile = Profile {
-        dll_overrides: BTreeMap::from([(dll.to_owned(), mode.to_owned())]),
-        ..wine_profile()
-    };
-    let issues = profile.validate(&ctx());
-    if errors(&issues).iter().any(|m| m.contains("dll_overrides")) {
-        Err(())
-    } else {
-        Ok(())
-    }
+    assert!(errors(&validate_profile(&profile, &ctx())).contains(&PROTON_REQUIRED));
 }
 
 #[test]
@@ -293,7 +169,7 @@ fn anticheat_needs_configured_runtime() {
         ..umu_profile()
     };
 
-    let missing = profile.validate(&ctx());
+    let missing = validate_profile(&profile, &ctx());
     assert!(
         errors(&missing).contains(&"`anticheat.battleye` needs `battleye_runtime` in config.toml")
     );
@@ -305,7 +181,7 @@ fn anticheat_needs_configured_runtime() {
         ..ctx()
     };
     assert!(
-        errors(&profile.validate(&configured))
+        errors(&validate_profile(&profile, &configured))
             .iter()
             .all(|m| !m.contains("anticheat"))
     );
@@ -326,23 +202,9 @@ fn anticheat_with_wine_warns() {
     };
 
     assert!(
-        warnings(&profile.validate(&configured))
+        warnings(&validate_profile(&profile, &configured))
             .contains(&"anti-cheat runtimes only work with Proton-based wine builds")
     );
-}
-
-#[test]
-fn bad_env_and_wrappers() {
-    let profile = Profile {
-        env: BTreeMap::from([("A=B".into(), "1".into())]),
-        wrappers: vec!["mangohud".into(), " ".into()],
-        ..wine_profile()
-    };
-
-    let issues = profile.validate(&ctx());
-
-    assert!(errors(&issues).contains(&"`wrappers` must not contain empty entries"));
-    assert!(errors(&issues).contains(&"`env` key `A=B` is not a valid variable name"));
 }
 
 #[test]
@@ -377,6 +239,8 @@ fn game_missing_files_are_warnings() {
 fn game_errors() {
     let mut game = game(Path::new("game.exe"));
     game.name = "my game".into();
+    game.args = vec!["a\0b".into()];
+    game.env = BTreeMap::from([("A=B".into(), "1".into())]);
 
     let issues = game.validate(None, &ctx());
     let errors = errors(&issues);
@@ -384,6 +248,8 @@ fn game_errors() {
     assert!(errors[0].contains("contains ` `"));
     assert_eq!(errors[1], "profile `default` does not exist");
     assert!(errors[2].starts_with("`exe` must be an absolute path"));
+    assert_eq!(errors[3], "`args` must not contain a NUL character");
+    assert_eq!(errors[4], "`env` key `A=B` is not a valid variable name");
 }
 
 #[test]
@@ -396,67 +262,4 @@ fn game_id_ignored_outside_umu() {
         warnings(&game.validate(Some(&profile), &ctx()))
             .contains(&"`game_id` is ignored: profile `default` uses runner `wine`")
     );
-}
-
-#[test]
-fn shader_cache_is_off_or_a_directory() {
-    let parse = |text: &str| -> Profile {
-        toml::from_str(&format!(
-            "name = \"p\"\nrunner = \"native\"\nshader_cache = \"{text}\"\n"
-        ))
-        .unwrap()
-    };
-    assert_eq!(parse("off").shader_cache, Some(ShaderCache::Off));
-    assert_eq!(
-        parse("~/cache").shader_cache,
-        Some(ShaderCache::Dir("~/cache".into()))
-    );
-    assert!(
-        toml::from_str::<Profile>("name = \"p\"\nrunner = \"native\"\nshader_cache = \"\"\n")
-            .is_err()
-    );
-    // Written back the way it was read.
-    let profile = parse("off");
-    let text = toml::to_string(&profile).unwrap();
-    assert!(text.contains("shader_cache = \"off\""), "{text}");
-    assert_eq!(toml::from_str::<Profile>(&text).unwrap(), profile);
-}
-
-#[test]
-fn shader_cache_directory_must_be_absolute() {
-    let profile = Profile {
-        shader_cache: Some(ShaderCache::Dir("cache".into())),
-        ..Profile::new("p", Runner::Native)
-    };
-    assert_eq!(
-        errors(&profile.validate(&ctx())),
-        ["`shader_cache` must be an absolute path (or start with `~`), got `cache`"]
-    );
-    let profile = Profile {
-        shader_cache: Some(ShaderCache::Dir("~/cache".into())),
-        ..Profile::new("p", Runner::Native)
-    };
-    assert!(errors(&profile.validate(&ctx())).is_empty());
-}
-
-#[test]
-fn shader_cache_env_follows_protons_layout() {
-    let env: BTreeMap<_, _> = ShaderCache::env(Path::new("/c/g")).into_iter().collect();
-    assert_eq!(
-        env["DXVK_STATE_CACHE_PATH"],
-        Path::new("/c/g/DXVK_state_cache")
-    );
-    assert_eq!(
-        env["VKD3D_SHADER_CACHE_PATH"],
-        Path::new("/c/g/VKD3D_shader_cache")
-    );
-    assert_eq!(env["MESA_SHADER_CACHE_DIR"], Path::new("/c/g"));
-    assert_eq!(
-        env["__GL_SHADER_DISK_CACHE_PATH"],
-        Path::new("/c/g/nvidiav1")
-    );
-
-    let dir = tempfile::tempdir().unwrap();
-    ShaderCache::create_dirs(&dir.path().join("g")).unwrap();
-    assert!(dir.path().join("g/DXVK_state_cache").is_dir());
 }

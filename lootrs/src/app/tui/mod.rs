@@ -14,7 +14,7 @@ use std::{
 };
 
 use liblootrs::{
-    model::{Issue, Runner, Severity, Subject},
+    model::{self, Issue, Runner, Severity, Subject},
     process::{self, Owner, Process},
     runlog::{self, RunKind},
     store::{self, Catalog},
@@ -771,7 +771,10 @@ impl Tui {
                 profile.name
             )]);
         }
-        let warnings = Self::split(profile.validate(&validation_context(&self.settings)))?;
+        let warnings = Self::split(model::validate_profile(
+            &profile,
+            &validation_context(&self.settings),
+        ))?;
 
         self.check_unchanged(&path).map_err(|err| vec![err])?;
         let result = store::save_profile(config, &profile).map_err(|err| vec![err.to_string()]);

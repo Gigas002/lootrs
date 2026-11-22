@@ -3,10 +3,7 @@
 //! Everything here is pure: environment values come in through a lookup
 //! function, so callers decide where they are read from.
 
-use std::{
-    ffi::OsString,
-    path::{Path, PathBuf},
-};
+use std::{ffi::OsString, path::PathBuf};
 
 #[cfg(test)]
 mod tests;
@@ -84,15 +81,7 @@ impl AppDirs {
     }
 }
 
-/// Expands a leading `~` (alone or followed by `/`) to `home`.
-///
-/// `~user` forms are left untouched.
-pub fn expand_tilde(path: &Path, home: &Path) -> PathBuf {
-    match path.strip_prefix("~") {
-        Ok(rest) => home.join(rest),
-        Err(_) => path.to_path_buf(),
-    }
-}
+pub use libgameprofiles::expand_tilde;
 
 fn absolute_var<F>(lookup: &F, var: &str) -> Option<PathBuf>
 where
