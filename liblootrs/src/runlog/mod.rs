@@ -56,7 +56,16 @@ pub fn create(logs_dir: &Path, kind: RunKind, stamp: &str, keep: usize) -> io::R
     std::fs::create_dir_all(&dir)?;
     prune(&dir, keep.saturating_sub(1))?;
 
-    let (file, path, stem) = (1..)
+    // After the newest log of this second, never in a gap left by pruning:
+    // a reused name would look older than it is.
+    let first = logs(&dir)?
+        .iter()
+        .map(|log| age(log))
+        .filter(|(log_stamp, _)| *log_stamp == stamp)
+        .map(|(_, n)| n.saturating_add(1))
+        .max()
+        .unwrap_or(1);
+    let (file, path, stem) = (first..)
         .map(|n| match n {
             1 => stamp.to_owned(),
             n => format!("{stamp}-{n}"),
@@ -120,16 +129,7 @@ pub fn remove_if_empty(dir: &Path) {
 
 /// Deletes the oldest logs (and their artifacts) until at most `keep` remain.
 fn prune(dir: &Path, keep: usize) -> io::Result<()> {
-    let mut logs: Vec<PathBuf> = std::fs::read_dir(dir)?
-        .filter_map(|entry| Some(entry.ok()?.path()))
-        .filter(|path| {
-            path.extension().is_some_and(|ext| ext == "log")
-                && path.file_name().is_some_and(|name| name != LATEST)
-                && !path.is_symlink()
-        })
-        .collect();
-    // Stamps sort chronologically.
-    logs.sort();
+    let logs = logs(dir)?;
 
     let excess = logs.len().saturating_sub(keep);
     for log in &logs[..excess] {
@@ -140,6 +140,38 @@ fn prune(dir: &Path, keep: usize) -> io::Result<()> {
         }
     }
     Ok(())
+}
+
+/// The run logs in `dir`, oldest first.
+fn logs(dir: &Path) -> io::Result<Vec<PathBuf>> {
+    let mut logs: Vec<PathBuf> = std::fs::read_dir(dir)?
+        .filter_map(|entry| Some(entry.ok()?.path()))
+        .filter(|path| {
+            path.extension().is_some_and(|ext| ext == "log")
+                && path.file_name().is_some_and(|name| name != LATEST)
+                && !path.is_symlink()
+        })
+        .collect();
+    logs.sort_by(|a, b| age(a).cmp(&age(b)));
+    Ok(logs)
+}
+
+/// Sort key for a run log, oldest first: its stamp, then the `-2`, `-3`, ...
+/// a run started in the same second gets. Stamps (`YYYYMMDD-HHMMSS`) sort
+/// chronologically as text; by name alone, `<stamp>-2.log` would sort before
+/// `<stamp>.log` and `-10` before `-2`.
+fn age(log: &Path) -> (&str, u32) {
+    let stem = log
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or_default();
+    match stem.rsplit_once('-') {
+        Some((stamp, n)) if stamp.contains('-') => match n.parse() {
+            Ok(n) => (stamp, n),
+            Err(_) => (stem, 1),
+        },
+        _ => (stem, 1),
+    }
 }
 
 /// Atomically repoints `latest.log` (relative link) at `target`.

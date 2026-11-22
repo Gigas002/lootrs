@@ -147,3 +147,27 @@ fn concurrent_creates_all_succeed() {
     assert_eq!(paths.len(), 16);
     assert!(paths.contains(&latest(logs.path(), kind).unwrap()));
 }
+
+#[test]
+fn retention_orders_same_second_runs_by_their_suffix() {
+    let logs = tempfile::tempdir().unwrap();
+    let kind = RunKind::Game("wow");
+    let stamp = "20261027-211403";
+    let paths: Vec<PathBuf> = (0..11)
+        .map(|_| create(logs.path(), kind, stamp, 3).unwrap().path)
+        .collect();
+
+    assert_eq!(
+        names(&kind.dir(logs.path())),
+        [
+            "20261027-211403-10",
+            "20261027-211403-10.log",
+            "20261027-211403-11",
+            "20261027-211403-11.log",
+            "20261027-211403-9",
+            "20261027-211403-9.log",
+            "latest.log",
+        ]
+    );
+    assert_eq!(latest(logs.path(), kind).as_ref(), paths.last());
+}
