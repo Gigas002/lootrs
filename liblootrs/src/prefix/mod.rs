@@ -143,6 +143,8 @@ pub struct EnsureContext<'a> {
     pub tags: &'a BTreeMap<String, OsString>,
     /// See [`crate::launch::LaunchContext::umu_runtime_update`].
     pub umu_runtime_update: bool,
+    /// See [`crate::launch::LaunchContext::umu_folders`].
+    pub umu_folders: Option<&'a Path>,
 }
 
 /// Sets up the profile's prefix. `Ok(None)` for native, which has no prefix.
@@ -202,7 +204,14 @@ pub fn ensure(
             let umu_run = umu::resolve_umu_run(profile, ctx.home, ctx.search_path)
                 .map_err(PrefixError::Runner)?;
             let proton = umu::resolve_proton(profile, ctx.home).map_err(PrefixError::Runner)?;
-            let mut env = umu::base_env(profile, &prefix, &proton, None, ctx.umu_runtime_update);
+            let mut env = umu::base_env(
+                profile,
+                &prefix,
+                &proton,
+                None,
+                ctx.umu_runtime_update,
+                ctx.umu_folders,
+            );
             env.extend(ctx.tags.clone());
             ensure_umu(&UmuSetup {
                 prefix: &prefix,

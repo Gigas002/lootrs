@@ -77,6 +77,9 @@ pub struct LaunchContext<'a> {
     pub eac_runtime: Option<&'a Path>,
     /// Let umu update its Steam Runtime; otherwise `UMU_RUNTIME_UPDATE=0`.
     pub umu_runtime_update: bool,
+    /// umu's folders (`UMU_FOLDERS_PATH`): it reads the Steam Linux Runtime
+    /// from `<dir>/umu/<variant>` instead of `~/.local/share/umu`.
+    pub umu_folders: Option<&'a Path>,
 }
 
 /// A fully resolved command.

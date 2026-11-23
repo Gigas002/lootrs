@@ -49,6 +49,7 @@ fn defaults_without_config_file() {
         Duration::from_secs(DEFAULT_STOP_TIMEOUT_SECS)
     );
     assert!(!settings.umu_runtime_update);
+    assert_eq!(settings.umu_folders, None);
     assert_eq!(settings.anticheat, AnticheatRuntimes::default());
 }
 
@@ -75,6 +76,7 @@ log_keep = 3
 stop_timeout_secs = 0
 prefix_root = "/games/prefixes"
 umu_runtime_update = true
+umu_folders = "~/.local/share/sruman"
 battleye_runtime = "~/be"
 eac_runtime = ""
 "#,
@@ -88,6 +90,10 @@ eac_runtime = ""
     assert_eq!(settings.stop_timeout, Duration::ZERO);
     assert_eq!(settings.dirs.prefix_root, Path::new("/games/prefixes"));
     assert!(settings.umu_runtime_update);
+    assert_eq!(
+        settings.umu_folders,
+        Some(root.path().join("home/.local/share/sruman"))
+    );
     assert_eq!(
         settings.anticheat.battleye,
         Some(root.path().join("home/be"))

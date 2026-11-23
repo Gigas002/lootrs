@@ -19,6 +19,7 @@ struct Fixture {
     search_path: Vec<PathBuf>,
     artifacts: PathBuf,
     runtime_update: bool,
+    folders: Option<PathBuf>,
     game: Game,
 }
 
@@ -42,6 +43,7 @@ impl Fixture {
             search_path: vec![dir.path().join("bin")],
             artifacts: dir.path().join("artifacts"),
             runtime_update: false,
+            folders: None,
             dir,
             game,
         }
@@ -61,6 +63,7 @@ impl Fixture {
             battleye_runtime: None,
             eac_runtime: None,
             umu_runtime_update: self.runtime_update,
+            umu_folders: self.folders.as_deref(),
         }
     }
 
@@ -123,6 +126,20 @@ fn runtime_update_can_be_allowed() {
     let spec = fx.run(&fx.profile()).unwrap();
 
     assert!(!spec.env.contains_key("UMU_RUNTIME_UPDATE"));
+}
+
+#[test]
+fn umu_folders_point_umu_at_another_runtime() {
+    let mut fx = Fixture::new();
+    let spec = fx.run(&fx.profile()).unwrap();
+    assert!(!spec.env.contains_key("UMU_FOLDERS_PATH"));
+
+    let folders = fx.path("sruman");
+    fx.folders = Some(folders.clone());
+    let spec = fx.run(&fx.profile()).unwrap();
+    assert_eq!(spec.env["UMU_FOLDERS_PATH"], folders.as_os_str());
+    // Independent of updates: still off unless allowed.
+    assert_eq!(spec.env["UMU_RUNTIME_UPDATE"], "0");
 }
 
 #[test]

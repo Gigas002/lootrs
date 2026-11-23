@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- `umu_folders` in `config.toml`: umu's folders (`UMU_FOLDERS_PATH`), so umu
+  profiles run on a Steam Linux Runtime installed elsewhere (sruman's, say)
+  instead of the one umu downloads.
+
 ### Changed
 
 - libgameprofiles comes from crates.io (`0.1`) instead of its git master

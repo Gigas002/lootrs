@@ -24,6 +24,7 @@ pub struct FileConfig {
     pub stop_timeout_secs: Option<u64>,
     pub prefix_root: Option<PathBuf>,
     pub umu_runtime_update: Option<bool>,
+    pub umu_folders: Option<PathBuf>,
     pub battleye_runtime: Option<PathBuf>,
     pub eac_runtime: Option<PathBuf>,
 }
@@ -72,6 +73,7 @@ pub const KEYS: &[&str] = &[
     "stop_timeout_secs",
     "prefix_root",
     "umu_runtime_update",
+    "umu_folders",
     "battleye_runtime",
     "eac_runtime",
 ];

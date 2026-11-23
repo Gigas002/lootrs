@@ -227,6 +227,7 @@ pub fn launch_context(settings: &Settings) -> LaunchContext<'_> {
         battleye_runtime: settings.anticheat.battleye.as_deref(),
         eac_runtime: settings.anticheat.eac.as_deref(),
         umu_runtime_update: settings.umu_runtime_update,
+        umu_folders: settings.umu_folders.as_deref(),
     }
 }
 

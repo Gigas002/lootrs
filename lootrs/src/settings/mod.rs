@@ -129,6 +129,8 @@ pub struct Settings {
     pub logging: Logging,
     pub stop_timeout: Duration,
     pub umu_runtime_update: bool,
+    /// `UMU_FOLDERS_PATH` for umu profiles: where umu finds its runtime.
+    pub umu_folders: Option<PathBuf>,
     pub anticheat: AnticheatRuntimes,
     /// `$PAGER` (may include arguments), `less` by default; the TUI opens logs with it.
     pub pager: String,
@@ -276,6 +278,7 @@ impl Settings {
                 file.stop_timeout_secs.unwrap_or(DEFAULT_STOP_TIMEOUT_SECS),
             ),
             umu_runtime_update: file.umu_runtime_update.unwrap_or(false),
+            umu_folders: from_config("umu_folders", file.umu_folders)?,
             anticheat: AnticheatRuntimes {
                 battleye: from_config("battleye_runtime", file.battleye_runtime)?,
                 eac: from_config("eac_runtime", file.eac_runtime)?,
