@@ -8,7 +8,9 @@ All notable changes to this project will be documented in this file.
 
 - `umu_folders` in `config.toml`: umu's folders (`UMU_FOLDERS_PATH`), so umu
   profiles run on a Steam Linux Runtime installed elsewhere (sruman's, say)
-  instead of the one umu downloads.
+  instead of the one umu downloads. `lootrs check` warns about a umu
+  profile whose Proton needs a runtime that isn't there, since umu would
+  download it into that folder.
 
 ### Changed
 

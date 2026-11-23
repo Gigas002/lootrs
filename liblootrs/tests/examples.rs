@@ -20,6 +20,7 @@ fn examples_load_and_validate() {
         home: Path::new("/home/user"),
         battleye_runtime: false,
         eac_runtime: false,
+        umu_folders: None,
     };
     let errors: Vec<_> = catalog
         .validate(&ctx)

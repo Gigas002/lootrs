@@ -52,6 +52,11 @@ umu_runtime_update = false   # the default: umu never updates it
 
 Prefer Protons that run on `steamrt4`, the latest runtime.
 
+umu downloads a runtime that's missing there into `umu_folders` instead, so
+`lootrs check` warns about a umu profile whose Proton needs a runtime that
+isn't in it (`<umu_folders>/umu/<variant>`: `steamrt4`, `steamrt3` for
+sniper, `steamrt2` for soldier).
+
 ## Logs
 
 | Log                             | Where (under `~/.local/state/lootrs/logs/`)                   |

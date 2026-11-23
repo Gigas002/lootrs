@@ -307,3 +307,29 @@ fn execute_builtin_program_is_passed_through() {
 
     assert_eq!(spec.args, ["winecfg"]);
 }
+
+#[test]
+fn runtime_variant_reads_the_tool_manifest() {
+    let dir = tempfile::tempdir().unwrap();
+    let proton = dir.path();
+    assert_eq!(runtime_variant(proton), None);
+    std::fs::write(
+        proton.join("toolmanifest.vdf"),
+        "\"manifest\"\n{\n  \"version\" \"2\"\n  \"commandline\" \"/proton %verb%\"\n  \"require_tool_appid\" \"4183110\"\n}\n",
+    )
+    .unwrap();
+    assert_eq!(runtime_variant(proton), Some("steamrt4"));
+    std::fs::write(
+        proton.join("toolmanifest.vdf"),
+        "\"manifest\"\n{\n  \"require_tool_appid\" \"1628350\"\n}\n",
+    )
+    .unwrap();
+    assert_eq!(runtime_variant(proton), Some("steamrt3"));
+    // A host Proton (no runtime).
+    std::fs::write(
+        proton.join("toolmanifest.vdf"),
+        "\"manifest\"\n{\n  \"commandline\" \"/proton %verb%\"\n}\n",
+    )
+    .unwrap();
+    assert_eq!(runtime_variant(proton), None);
+}

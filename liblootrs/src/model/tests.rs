@@ -12,6 +12,7 @@ fn ctx() -> ValidationContext<'static> {
         home: Path::new(HOME),
         battleye_runtime: false,
         eac_runtime: false,
+        umu_folders: None,
     }
 }
 
@@ -191,6 +192,7 @@ fn anticheat_needs_configured_runtime() {
     let configured = ValidationContext {
         battleye_runtime: true,
         eac_runtime: true,
+        umu_folders: None,
         ..ctx()
     };
     assert!(
@@ -211,6 +213,7 @@ fn anticheat_with_wine_warns() {
     };
     let configured = ValidationContext {
         eac_runtime: true,
+        umu_folders: None,
         ..ctx()
     };
 
@@ -275,4 +278,39 @@ fn game_id_ignored_outside_umu() {
         warnings(&game.validate(Some(&profile), &ctx()))
             .contains(&"`game_id` is ignored: profile `default` uses runner `wine`")
     );
+}
+
+#[cfg(feature = "umu")]
+#[test]
+fn umu_folders_without_the_protons_runtime_warns() {
+    let dir = tempfile::tempdir().unwrap();
+    let proton = dir.path().join("dwproton");
+    std::fs::create_dir_all(&proton).unwrap();
+    std::fs::write(proton.join("proton"), "").unwrap();
+    std::fs::write(
+        proton.join("toolmanifest.vdf"),
+        "\"manifest\"\n{\n  \"require_tool_appid\" \"4183110\"\n}\n",
+    )
+    .unwrap();
+    let mut profile = umu_profile();
+    profile.umu.as_mut().unwrap().proton = Some(proton.clone());
+    let folders = dir.path().join("folders");
+    let ctx = ValidationContext {
+        umu_folders: Some(&folders),
+        ..ctx()
+    };
+    let missing = validate_profile(&profile, &ctx);
+    assert!(
+        warnings(&missing)
+            .iter()
+            .any(|m| m.contains("`steamrt4`") && m.contains("umu would download it")),
+        "{missing:?}"
+    );
+    let runtime = folders.join("umu/steamrt4");
+    std::fs::create_dir_all(&runtime).unwrap();
+    std::fs::write(runtime.join("mtree.txt.gz"), "").unwrap();
+    assert!(warnings(&validate_profile(&profile, &ctx)).is_empty());
+    // Without `umu_folders`, umu keeps its own copy: nothing to say.
+    std::fs::remove_dir_all(&folders).unwrap();
+    assert!(warnings(&validate_profile(&profile, &super::tests::ctx())).is_empty());
 }

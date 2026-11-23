@@ -121,8 +121,24 @@ that is the whole difference. A detached `run` returns in 0.03 s, `stop` in
   setting up the same prefix in that gap could relink DXVK just before the
   first starts. It needs two different games of one prefix launched within
   milliseconds; accepted.
-- **umu live**: not run (it would download the Steam Linux Runtime); see §1.
+- **umu live**: run on 2026-11-23 on sruman's runtime; see §7a.
 - **Release**: nothing was pushed or tagged.
+
+## 7a. Follow-up pass (2026-11-23)
+
+Covers what changed since: `umu_folders` (`UMU_FOLDERS_PATH`) and the
+dependency update (libgameprofiles from crates.io). The new code was read
+for where the setting becomes an environment variable and a path; umu
+1.4.4's own source was read for how it uses the variable; the umu route was
+run for real during the route check of 2026-11-23 (a Windows game through
+umu and dwproton on sruman's steamrt4, exit codes and logs), which closes
+**umu live** in §7. Gates green; `cargo deny check` passes.
+
+| Finding | Severity | Status |
+| ------- | -------- | ------ |
+| umu downloads a runtime it doesn't find, and with `umu_folders` set it downloads it into that folder: a umu profile whose Proton needs `steamrt3` (sniper) while only `steamrt4` was put there would fetch sniper into, say, sruman's data folder, which is what `umu_folders` is meant to avoid, and nothing said so. `lootrs check` now reads the Proton's `toolmanifest.vdf` (`require_tool_appid`, mapped as umu maps it) and warns when `<umu_folders>/umu/<variant>/mtree.txt.gz`, umu's own test, is missing. | low | Fixed |
+| `umu_folders` goes through the same checks as the other path keys (`~` expanded, must be absolute) and reaches umu only as an environment variable; a profile's `env` can still override it, on purpose. | — | OK |
+| lootrs never calls sruman: the folder is only a path. | — | OK (by design) |
 
 ## 8. Re-running the audit
 
