@@ -93,6 +93,24 @@ pub fn resolve_umu_run(
     }
 }
 
+/// The folder umu keeps the Steam Linux Runtime `proton` needs in
+/// (`<UMU_FOLDERS_PATH>/umu/<variant>`), from `require_tool_appid` in its
+/// `toolmanifest.vdf`: `steamrt4`, `steamrt3` (sniper) or `steamrt2`
+/// (soldier). `None` for a Proton that runs on the host.
+pub fn runtime_variant(proton: &Path) -> Option<&'static str> {
+    let text = std::fs::read_to_string(proton.join("toolmanifest.vdf")).ok()?;
+    let app_id = text.lines().find_map(|line| {
+        let rest = line.trim().strip_prefix("\"require_tool_appid\"")?;
+        rest.trim().trim_matches('"').parse::<u32>().ok()
+    })?;
+    match app_id {
+        1_391_110 => Some("steamrt2"),
+        1_628_350 => Some("steamrt3"),
+        4_183_110 => Some("steamrt4"),
+        _ => None,
+    }
+}
+
 /// `[umu].proton`: an absolute Proton directory containing the `proton` script.
 pub fn resolve_proton(profile: &Profile, home: &Path) -> Result<PathBuf, String> {
     let Some(proton) = profile.umu.as_ref().and_then(|umu| umu.proton.as_deref()) else {

@@ -8,6 +8,7 @@ fn ctx(home: &Path) -> ValidationContext<'_> {
         home,
         battleye_runtime: false,
         eac_runtime: false,
+        umu_folders: None,
     }
 }
 

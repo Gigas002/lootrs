@@ -20,6 +20,7 @@ fn fixture_profiles_load() {
         home: Path::new("/home/user"),
         battleye_runtime: false,
         eac_runtime: false,
+        umu_folders: None,
     };
     let mut names = Vec::new();
     for entry in std::fs::read_dir(fixtures()).unwrap() {

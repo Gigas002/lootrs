@@ -12,6 +12,7 @@ fn ctx() -> ValidationContext<'static> {
         home: Path::new("/home/u"),
         battleye_runtime: false,
         eac_runtime: false,
+        umu_folders: None,
     }
 }
 

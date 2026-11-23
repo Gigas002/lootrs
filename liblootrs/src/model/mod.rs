@@ -25,6 +25,8 @@ pub struct ValidationContext<'a> {
     pub battleye_runtime: bool,
     /// Whether `eac_runtime` is set in `config.toml`.
     pub eac_runtime: bool,
+    /// `umu_folders` from `config.toml`: where umu finds its runtimes.
+    pub umu_folders: Option<&'a Path>,
 }
 
 /// Whether this build of lootrs can launch `runner` (Cargo features `wine`
@@ -64,6 +66,23 @@ pub fn validate_profile(profile: &Profile, ctx: &ValidationContext) -> Vec<Issue
     }
     if runner == Runner::Umu && profile.umu.as_ref().is_none_or(|umu| umu.proton.is_none()) {
         issues.error(PROTON_REQUIRED);
+    }
+    // With `umu_folders`, umu is meant to use the runtime kept there; one
+    // that's missing it downloads into that folder instead.
+    #[cfg(feature = "umu")]
+    if runner == Runner::Umu
+        && let Some(folders) = ctx.umu_folders
+        && let Ok(proton) = crate::runner::umu::resolve_proton(profile, ctx.home)
+        && let Some(variant) = crate::runner::umu::runtime_variant(&proton)
+    {
+        let dir = folders.join("umu").join(variant);
+        if !dir.join("mtree.txt.gz").is_file() {
+            issues.warn(format!(
+                "this Proton needs the `{variant}` runtime, which isn't in `umu_folders` \
+                 ({}): umu would download it there",
+                dir.display()
+            ));
+        }
     }
 
     let anticheat = profile.anticheat;

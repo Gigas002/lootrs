@@ -236,5 +236,6 @@ pub fn validation_context(settings: &Settings) -> ValidationContext<'_> {
         home: &settings.dirs.home,
         battleye_runtime: settings.anticheat.battleye.is_some(),
         eac_runtime: settings.anticheat.eac.is_some(),
+        umu_folders: settings.umu_folders.as_deref(),
     }
 }
