@@ -14,6 +14,7 @@ fn ctx<'a>(home: &'a Path, battleye: Option<&'a Path>, eac: Option<&'a Path>) ->
         battleye_runtime: battleye,
         eac_runtime: eac,
         umu_runtime_update: false,
+        umu_folders: None,
     }
 }
 

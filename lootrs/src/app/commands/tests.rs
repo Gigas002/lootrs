@@ -39,6 +39,7 @@ fn launch_ctx() -> LaunchContext<'static> {
         battleye_runtime: None,
         eac_runtime: None,
         umu_runtime_update: false,
+        umu_folders: None,
     }
 }
 

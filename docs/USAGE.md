@@ -30,6 +30,28 @@ Without a wrapper, MangoHud's Vulkan layer can be enabled through the environmen
 env = { MANGOHUD = "1", MANGOHUD_CONFIGFILE = "/home/me/.config/MangoHud/wow.conf" }
 ```
 
+## umu's Steam Linux Runtime
+
+A Proton that needs a Steam Linux Runtime (its `toolmanifest.vdf` names one)
+runs in it through umu. By default umu downloads that runtime to
+`~/.local/share/umu/<variant>` on its first run. To use a runtime installed
+some other way, set `umu_folders` in `config.toml`: lootrs exports it as
+`UMU_FOLDERS_PATH`, and umu reads the runtime from `<umu_folders>/umu/<variant>`.
+lootrs doesn't care how it got there. With
+[sruman](https://github.com/Gigas002/sruman), for example:
+
+```sh
+sruman install steamrt4 && sruman provide-umu steamrt4
+```
+
+```toml
+# config.toml
+umu_folders = "~/.local/share/sruman"
+umu_runtime_update = false   # the default: umu never updates it
+```
+
+Prefer Protons that run on `steamrt4`, the latest runtime.
+
 ## Logs
 
 | Log                             | Where (under `~/.local/state/lootrs/logs/`)                   |

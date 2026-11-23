@@ -316,6 +316,7 @@ fn supervise(
             battleye_runtime: settings.anticheat.battleye.as_deref(),
             eac_runtime: settings.anticheat.eac.as_deref(),
             umu_runtime_update: settings.umu_runtime_update,
+            umu_folders: settings.umu_folders.as_deref(),
         },
     );
 
@@ -495,6 +496,7 @@ pub fn ensure_prefix(
             lock_dir: &settings.dirs.runtime,
             tags: &tags,
             umu_runtime_update: settings.umu_runtime_update,
+            umu_folders: settings.umu_folders.as_deref(),
         },
         |prefix| process::prefix_in_use(&process::scan(), prefix),
     )

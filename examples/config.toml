@@ -22,6 +22,14 @@ stop_timeout_secs = 5
 # Let umu update its Steam Linux Runtime. When false, lootrs exports UMU_RUNTIME_UPDATE=0.
 umu_runtime_update = false
 
+# Where umu finds its Steam Linux Runtime: exported as UMU_FOLDERS_PATH, so umu
+# reads the runtime from <dir>/umu/<variant> (steamrt4, sniper, ...) instead of
+# ~/.local/share/umu. Point it at a runtime managed elsewhere, e.g. sruman's
+# after `sruman provide-umu steamrt4`, and leave umu_runtime_update off so
+# umu leaves it alone. Prefer Protons on steamrt4, the latest runtime.
+# Default: unset (umu's own folders).
+# umu_folders = "~/.local/share/sruman"
+
 # User-installed anti-cheat runtimes, used by profiles with battleye/eac enabled.
 # battleye_runtime = "~/.local/share/Steam/steamapps/common/Proton BattlEye Runtime"
 # eac_runtime = "~/.local/share/Steam/steamapps/common/Proton EasyAntiCheat Runtime"

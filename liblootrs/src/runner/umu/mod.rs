@@ -43,7 +43,14 @@ pub fn command(
         return Err(problems);
     };
 
-    let mut env = base_env(profile, prefix, &proton, game_id, ctx.umu_runtime_update);
+    let mut env = base_env(
+        profile,
+        prefix,
+        &proton,
+        game_id,
+        ctx.umu_runtime_update,
+        ctx.umu_folders,
+    );
     // Not `UMU_LOG`: at debug level umu dumps the whole inherited environment
     // (tokens included) into the output, and run logs are meant to be shared.
     if debug {
@@ -109,13 +116,15 @@ pub fn resolve_proton(profile: &Profile, home: &Path) -> Result<PathBuf, String>
 }
 
 /// Environment every umu command for this prefix gets. `game_id` (a game's own)
-/// wins over the profile's `[umu].game_id`.
+/// wins over the profile's `[umu].game_id`. `folders` is `UMU_FOLDERS_PATH`,
+/// where umu finds its Steam Linux Runtime.
 pub fn base_env(
     profile: &Profile,
     prefix: &Path,
     proton: &Path,
     game_id: Option<&str>,
     runtime_update: bool,
+    folders: Option<&Path>,
 ) -> BTreeMap<String, OsString> {
     let umu = profile.umu.as_ref();
     let game_id = game_id
@@ -136,6 +145,9 @@ pub fn base_env(
     }
     if !runtime_update {
         env.insert("UMU_RUNTIME_UPDATE".into(), "0".into());
+    }
+    if let Some(folders) = folders {
+        env.insert("UMU_FOLDERS_PATH".into(), folders.into());
     }
     env
 }
